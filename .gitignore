@@ -1,0 +1,9 @@
+target/
+_build/
+.moon/
+*.wasm
+*.wat
+.DS_Store
+pkg.generated.mbti
+mq
+main.exe

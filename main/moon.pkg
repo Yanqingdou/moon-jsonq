@@ -1,0 +1,14 @@
+import {
+  "Yanqingdou/moon-jsonq/lib",
+  "moonbitlang/core/env",
+  "moonbitlang/core/async/stdio",
+  "moonbitlang/core/async/fs",
+}
+
+supported_targets = "-all+native"
+
+pkgtype(kind: "executable")
+
+options(
+  "allow-experimental-packages": true,
+)
