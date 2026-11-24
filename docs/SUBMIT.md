@@ -25,8 +25,8 @@ git remote add origin https://github.com/Yanqingdou/moon-jsonq.git
 git push -u origin main
 ```
 
-- [ ] 仓库是 **公开** 的，不是私有
-- [ ] README 在仓库首页能正常显示
+- [x] 仓库是 **公开** 的，不是私有（2026-11-24 已建 Yanqingdou/moon-jsonq 公开库并推送）
+- [x] README 在仓库首页能正常显示（2026-11-24 已在 GitHub 页面核对）
 - [ ] 不要最后一天一次性 push，要保留持续提交记录（官网验收要求）
 
 ## 官网申报
