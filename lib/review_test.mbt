@@ -297,6 +297,64 @@ test "p2: split(sep)" {
 }
 
 ///|
+test "p2: string interpolation" {
+  let input = @lib.parse_json_or_null("{\"name\": \"Yan\", \"score\": 95}")
+  assert_eq(
+    @lib.eval_one(
+      @lib.parse_filter("\"\\(.name) has \\(.score) points\"") |> unwrap(),
+      input,
+    ).to_string(),
+    "\"Yan has 95 points\"",
+  )
+  assert_eq(
+    @lib.eval_one(
+      @lib.parse_filter("\"\\(.score + 1) and \\(.score * 10)\"") |> unwrap(),
+      input,
+    ).to_string(),
+    "\"96 and 950\"",
+  )
+  // Non-string values interpolate like tostring; null too.
+  assert_eq(
+    @lib.eval_one(
+      @lib.parse_filter("\"\\(null)|\\(true)|\\([1,2])|\\(.missing)\"")
+      |> unwrap(),
+      input,
+    ).to_string(),
+    "\"null|true|[1,2]|null\"",
+  )
+  // A multi-output interpolation gives one output per value.
+  let ab = @lib.parse_json_or_null("{\"a\": 1, \"b\": 2}")
+  assert_eq(
+    @lib.eval_to_strings(@lib.parse_filter("\"\\(.a, .b)\"") |> unwrap(), ab),
+    ["\"1\"", "\"2\""],
+  )
+  // Nested quotes inside an interpolation.
+  assert_eq(
+    @lib.eval_one(
+      @lib.parse_filter("\"outer \\(\"inner \\(.name)\") end\"") |> unwrap(),
+      input,
+    ).to_string(),
+    "\"outer inner Yan end\"",
+  )
+  // Interpolation in an object value and in an object key.
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter("{s: \"v=\\(.score)\"}") |> unwrap(), input).to_string(),
+    "{\"s\":\"v=95\"}",
+  )
+  let one = @lib.parse_json_or_null("{\"a\": 1}")
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter("{\"\\(.a)\": 1}") |> unwrap(), one).to_string(),
+    "{\"1\":1}",
+  )
+  // An escaped backslash before a paren is literal, not an
+  // interpolation: "\\(x)" stays as the text "\(x)".
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter("\"\\\\(x)\"") |> unwrap(), @lib.Null).to_string(),
+    "\"\\\\(x)\"",
+  )
+}
+
+///|
 /// Helper: unwrap a parse result in tests, failing the test
 /// loudly if the filter did not parse.
 fn unwrap(r : Result[@lib.Filter, String]) -> @lib.Filter {

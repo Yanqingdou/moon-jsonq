@@ -135,7 +135,15 @@ pub fn eval(filter : Filter, input : JVal) -> Array[JVal] {
     ObjectCons(fields) => {
       let entries : Array[ObjEntry] = []
       for field in fields {
-        entries.push(ObjEntry::new(field.key, eval_one(field.value, input)))
+        // The key is a filter: usually a literal string, or
+        // an interpolation for `{"\(.k)": v}`.
+        match eval_one(field.key, input) {
+          Str(k) => entries.push(ObjEntry::new(k, eval_one(field.value, input)))
+          // A non-string key is an error in jq; here the
+          // entry is skipped, like the evaluator's other
+          // lenient type mistakes.
+          _ => ()
+        }
       }
       [Obj(entries)]
     }
@@ -267,6 +275,43 @@ pub fn eval(filter : Filter, input : JVal) -> Array[JVal] {
       }
     Not => [Bool(!input.is_truthy())]
     Empty => []
+    Interp(parts) => {
+      // Cross-product of the parts: literal text appends
+      // itself, an embedded filter appends one string per
+      // output it produces (like jq: `"\(.a, .b)"` gives
+      // two outputs). Values are stringified like jq's
+      // `tostring`, except strings stay unquoted.
+      let mut acc : Array[String] = [""]
+      for part in parts {
+        match part {
+          Text(t) => {
+            let next : Array[String] = []
+            for s in acc {
+              next.push(s + t)
+            }
+            acc = next
+          }
+          Expr(f) => {
+            let next : Array[String] = []
+            for s in acc {
+              for v in eval(f, input) {
+                let piece = match v {
+                  Str(x) => x
+                  _ => v.to_string()
+                }
+                next.push(s + piece)
+              }
+            }
+            acc = next
+          }
+        }
+      }
+      let out : Array[JVal] = []
+      for s in acc {
+        out.push(Str(s))
+      }
+      out
+    }
     Literal(value) => [value]
   }
 }

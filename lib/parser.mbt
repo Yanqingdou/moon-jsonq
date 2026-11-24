@@ -24,7 +24,7 @@
 ///
 /// Not yet parsed (clear `Err`, see docs/PLAN.md):
 /// `def`, `reduce`, `group_by`, `test` (regex), `..`,
-/// `$variables`, string interpolation `"\(…)"`, `getpath`.
+/// `$variables`, `getpath`.
 
 ///|
 pub(all) suberror ParseError {
@@ -255,6 +255,16 @@ fn Lexer::read_ident(self : Lexer) -> String {
 }
 
 ///|
+/// Read a string literal, returning its RAW inner content:
+/// escapes are left as written (`\n`, `\"`, `\\`, `\(`, …)
+/// and decoded later by `decode_escapes` / `parse_str_lit`.
+/// Raw mode matters for interpolation: `"\\(x)"` (escaped
+/// backslash + paren) must not become an interpolation,
+/// while `"\(x)"` must. The closing quote is found by
+/// skipping the character after every backslash — except
+/// that a `\(` starts an interpolation, whose whole
+/// balanced `\(…)` (nested strings included) is skipped,
+/// so a `"` inside it does not end the outer string.
 fn Lexer::read_string(self : Lexer) -> String raise ParseError {
   // Consume the opening quote.
   ignore(self.advance())
@@ -263,51 +273,214 @@ fn Lexer::read_string(self : Lexer) -> String raise ParseError {
     match self.advance() {
       None => raise ParseError("unterminated string literal in filter")
       Some('"') => return String::from_array(chars)
-      Some('\\') =>
-        match self.advance() {
-          None => raise ParseError("unterminated string literal in filter")
-          Some('n') => chars.push('\n')
-          Some('r') => chars.push('\r')
-          Some('t') => chars.push('\t')
-          Some('b') => chars.push('\u{08}')
-          Some('f') => chars.push('\u{0C}')
-          Some('/') => chars.push('/')
-          Some('\\') => chars.push('\\')
-          Some('"') => chars.push('"')
-          Some('u') => {
-            let mut code = 0
-            let mut i = 0
-            while i < 4 {
-              match self.advance() {
-                Some(c) if c.is_ascii_hexdigit() => {
-                  let d = if c.is_ascii_digit() {
-                    c.to_int() - '0'.to_int()
-                  } else if c >= 'a' && c <= 'f' {
-                    c.to_int() - 'a'.to_int() + 10
-                  } else {
-                    c.to_int() - 'A'.to_int() + 10
-                  }
-                  code = code * 16 + d
-                }
-                _ => raise ParseError("invalid \\u escape in string literal")
-              }
-              i = i + 1
-            }
-            chars.push(code.unsafe_to_char())
+      Some('\\') => {
+        chars.push('\\')
+        match self.peek() {
+          Some('(') => {
+            // Interpolation: consume the whole balanced group.
+            chars.push('(')
+            ignore(self.advance())
+            self.read_interp_body(chars)
           }
-          Some('(') =>
-            raise ParseError(
-              "string interpolation \"\\(...\\)\" is not supported yet (P2)",
-            )
-          Some(c) =>
-            raise ParseError(
-              "invalid escape '\\" + c.to_string() + "' in string literal",
-            )
+          _ =>
+            match self.advance() {
+              None => raise ParseError("unterminated string literal in filter")
+              Some(c) => chars.push(c)
+            }
         }
+      }
       Some(c) => chars.push(c)
     }
   }
   raise ParseError("unterminated string literal in filter")
+}
+
+///|
+/// Consume the body of a `\(...)` interpolation (the `\(` was
+/// already consumed) into `chars`, up to and including the
+/// matching `)`. Nested parens and nested strings are skipped.
+fn Lexer::read_interp_body(
+  self : Lexer,
+  chars : Array[Char],
+) -> Unit raise ParseError {
+  let mut depth = 1
+  let mut in_str = false
+  while true {
+    match self.advance() {
+      None => raise ParseError("unterminated string literal in filter")
+      Some(c) => {
+        chars.push(c)
+        if in_str {
+          if c == '\\' {
+            match self.advance() {
+              None => raise ParseError("unterminated string literal in filter")
+              Some(d) => chars.push(d)
+            }
+          } else if c == '"' {
+            in_str = false
+          }
+        } else if c == '"' {
+          in_str = true
+        } else if c == '(' {
+          depth = depth + 1
+        } else if c == ')' {
+          depth = depth - 1
+          if depth == 0 {
+            return
+          }
+        }
+      }
+    }
+  }
+}
+
+///|
+/// Decode the escapes in a raw string literal (`\n`, `\t`,
+/// `\\`, `\"`, `\uXXXX`, …). Used for literal text segments;
+/// interpolation markers `\(` are handled by `parse_str_lit`
+/// before this runs, so they never reach here.
+fn decode_escapes(raw : String) -> String raise ParseError {
+  let chars = raw.to_array()
+  let out : Array[Char] = []
+  let mut i = 0
+  while i < chars.length() {
+    let c = chars[i]
+    if c == '\\' {
+      if i + 1 >= chars.length() {
+        raise ParseError("unterminated string literal in filter")
+      }
+      let e = chars[i + 1]
+      match e {
+        'n' => out.push('\n')
+        'r' => out.push('\r')
+        't' => out.push('\t')
+        'b' => out.push('\u{08}')
+        'f' => out.push('\u{0C}')
+        '/' => out.push('/')
+        '\\' => out.push('\\')
+        '"' => out.push('"')
+        'u' => {
+          if i + 5 >= chars.length() {
+            raise ParseError("invalid \\u escape in string literal")
+          }
+          let mut code = 0
+          let mut j = 0
+          while j < 4 {
+            let h = chars[i + 2 + j]
+            if h.is_ascii_hexdigit() {
+              let d = if h.is_ascii_digit() {
+                h.to_int() - '0'.to_int()
+              } else if h >= 'a' && h <= 'f' {
+                h.to_int() - 'a'.to_int() + 10
+              } else {
+                h.to_int() - 'A'.to_int() + 10
+              }
+              code = code * 16 + d
+            } else {
+              raise ParseError("invalid \\u escape in string literal")
+            }
+            j = j + 1
+          }
+          out.push(code.unsafe_to_char())
+          i = i + 4
+        }
+        _ =>
+          raise ParseError(
+            "invalid escape '\\" + e.to_string() + "' in string literal",
+          )
+      }
+      i = i + 2
+    } else {
+      out.push(c)
+      i = i + 1
+    }
+  }
+  String::from_array(out)
+}
+
+///|
+/// Turn a raw string literal into a filter: a plain
+/// `Literal(Str)` when there is no interpolation, or an
+/// `Interp` when the text contains `\(expr)` parts.
+/// Each `\(…)` is matched with its closing `)` (nested
+/// parens and nested strings are skipped), and the inner
+/// source is parsed as a filter.
+fn parse_str_lit(raw : String) -> Filter raise ParseError {
+  let chars = raw.to_array()
+  let parts : Array[InterpPart] = []
+  let mut i = 0
+  let mut lit_start = 0
+  let mut found = false
+  while i < chars.length() {
+    // An escaped backslash `\\` is literal text: skip the
+    // pair, so the `(` after it is not read as a marker.
+    if chars[i] == '\\' && i + 1 < chars.length() && chars[i + 1] == '\\' {
+      i = i + 2
+    } else if chars[i] == '\\' && i + 1 < chars.length() && chars[i + 1] == '(' {
+      // Flush the literal text before this interpolation.
+      if i > lit_start {
+        parts.push(Text(decode_escapes(String::from_array(chars[lit_start:i]))))
+      }
+      found = true
+      // Find the matching ')', skipping nested strings.
+      let mut depth = 1
+      let mut j = i + 2
+      let mut in_str = false
+      let mut closed = false
+      while j < chars.length() {
+        let c = chars[j]
+        if in_str {
+          if c == '\\' {
+            j = j + 1
+          } else if c == '"' {
+            in_str = false
+          }
+        } else if c == '"' {
+          in_str = true
+        } else if c == '(' {
+          depth = depth + 1
+        } else if c == ')' {
+          depth = depth - 1
+          if depth == 0 {
+            closed = true
+            break
+          }
+        }
+        j = j + 1
+      }
+      if !closed {
+        raise ParseError("unterminated \\(...\\) in string literal")
+      }
+      let inner = String::from_array(chars[i + 2:j])
+      parts.push(Expr(parse_inline_filter(inner)))
+      i = j + 1
+      lit_start = i
+    } else {
+      i = i + 1
+    }
+  }
+  if !found {
+    return Literal(Str(decode_escapes(raw)))
+  }
+  if lit_start < chars.length() {
+    parts.push(
+      Text(decode_escapes(String::from_array(chars[lit_start:chars.length()]))),
+    )
+  }
+  Interp(parts)
+}
+
+///|
+/// Parse a filter from source text, used for the expression
+/// inside `\(...)`. The whole source must be one filter.
+fn parse_inline_filter(src : String) -> Filter raise ParseError {
+  let tokens = tokenize(src)
+  let parser = { tokens, pos: 0, }
+  let filter = parser.parse_pipe()
+  match parser.peek() {
+    Eof => filter
+    _ => raise ParseError("unexpected input in \\(...\\)")
+  }
 }
 
 // ------------------------------------------------------------------
@@ -593,9 +766,12 @@ fn Parser::parse_dot_suffix(self : Parser) -> Filter raise ParseError {
       }
     StrLit(_) =>
       match self.next() {
-        StrLit(s) => {
+        StrLit(raw) => {
           ignore(self.eat(Question))
-          IndexStr(s)
+          match parse_str_lit(raw) {
+            Literal(Str(s)) => IndexStr(s)
+            f => IndexExpr(f)
+          }
         }
         _ => raise ParseError("unreachable")
       }
@@ -658,9 +834,12 @@ fn Parser::parse_dot_first(self : Parser) -> Filter raise ParseError {
       }
     StrLit(_) =>
       match self.next() {
-        StrLit(s) => {
+        StrLit(raw) => {
           ignore(self.eat(Question))
-          IndexStr(s)
+          match parse_str_lit(raw) {
+            Literal(Str(s)) => IndexStr(s)
+            f => IndexExpr(f)
+          }
         }
         _ => raise ParseError("unreachable")
       }
@@ -743,9 +922,9 @@ fn Parser::parse_term(self : Parser) -> Filter raise ParseError {
       ignore(self.next())
       Literal(Num(n))
     }
-    StrLit(s) => {
+    StrLit(raw) => {
       ignore(self.next())
-      Literal(Str(s))
+      parse_str_lit(raw)
     }
     Ident(name) => self.parse_ident(name)
     _ =>
@@ -764,18 +943,22 @@ fn Parser::parse_object(self : Parser) -> Filter raise ParseError {
   }
   while true {
     // Key: `"k"` or `ident`, or shorthand `{name}`.
-    let key = match self.next() {
-      StrLit(s) => s
-      Ident(name) => name
+    // A quoted key may itself be interpolated: `{"\(.k)": v}`.
+    let key_filter = match self.next() {
+      StrLit(raw) => parse_str_lit(raw)
+      Ident(name) => Literal(Str(name))
       _ => raise ParseError("expected an object key in '{…}'")
     }
     let value = if self.eat(Colon) {
       self.parse_pipe_no_comma()
     } else {
       // Shorthand: `{name}` means `{"name": .name}`.
-      Field(key)
+      match key_filter {
+        Literal(Str(name)) => Field(name)
+        f => IndexExpr(f)
+      }
     }
-    fields.push(ObjectField::new(key, value))
+    fields.push(ObjectField::new(key_filter, value))
     if self.eat(Comma) {
       continue
     } else {

@@ -19,7 +19,7 @@
 ///   literals, string literals, `and` / `or`
 ///
 /// Not yet: `def`, `reduce`, `group_by`, `test` (regex),
-/// `..` (recursive descent), `$variables`, string interpolation,
+/// `..` (recursive descent), `$variables`,
 /// `getpath` / `paths`, module import. Those are listed in
 /// docs/PLAN.md as P2, with the reason for each deferral.
 
@@ -43,14 +43,26 @@ pub(all) enum Op {
 
 ///|
 /// One field of an object-construction filter `{k: f, …}`.
+/// The key is a filter, not a plain string: usually a
+/// `Literal(Str)` for a static key, or an `Interp` when the
+/// key itself is interpolated, e.g. `{"\(.k)": v}`.
 pub(all) struct ObjectField {
-  key : String
+  key : Filter
   value : Filter
 }
 
 ///|
-pub fn ObjectField::new(key : String, value : Filter) -> ObjectField {
+pub fn ObjectField::new(key : Filter, value : Filter) -> ObjectField {
   { key, value, }
+}
+
+///|
+/// One piece of an interpolated string `"…\(expr)…"`.
+pub(all) enum InterpPart {
+  /// Literal text (escapes already decoded).
+  Text(String)
+  /// An embedded filter, evaluated and stringified.
+  Expr(Filter)
 }
 
 ///|
@@ -120,6 +132,9 @@ pub(all) enum Filter {
   Not
   /// `empty` — produces no output at all.
   Empty
+  /// `"…\(expr)…"` — string interpolation; one output per
+  /// output of the embedded filters (like jq).
+  Interp(Array[InterpPart])
   /// A literal value, e.g. `42`, `"hi"`, `true`, `null`.
   Literal(JVal)
 }

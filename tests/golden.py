@@ -79,6 +79,14 @@ CASES = [
     ('""', 'split("")'),
     ('"a"', 'split("a")'),
     ('"a::b"', 'split("::")'),
+    ('{"name":"Yan","score":95}', '"\\(.name) has \\(.score) points"'),
+    ('{"a":2}', '"\\(.a + 1) and \\(.a * 10)"'),
+    ('null', '"\\(null)|\\(true)|\\([1,2])|\\(.missing)"'),
+    ('{"a":1,"b":2}', '"\\(.a, .b)"'),
+    ('{"name":"Yan"}', '"outer \\("inner \\(.name)") end"'),
+    ('{"a":1}', '{s: "v=\\(.a)"}'),
+    ('{"a":1}', '{"\\(.a)": 1}'),
+    ('null', '"\\\\(x)"'),
 ]
 
 def run(cmd, inp):
