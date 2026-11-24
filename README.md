@@ -33,6 +33,7 @@ echo '{"name":"Yan","score":95}' | mq '.name'
 | `"\(expr)"` | 字符串插值，多输出时每个输出各一行 | ✅ |
 | `$x`、`exp as $x \| body` | 变量读取与绑定（`as` 比 `,` 结合更紧） | ✅ |
 | `reduce exp as $x (init; update)` | 把多个输出折叠成一个值 | ✅ |
+| `group_by(f)` | 按 `f` 排序后分组 | ✅ |
 | `.[]` | 遍历数组 / 对象值 | ✅ |
 | `a \| b`、`a, b` | 管道、逗号，多输出 | ✅ |
 | `a // b` | 空值 / 假值时用右边 | ✅ |
@@ -53,10 +54,10 @@ CLI 选项：`-r/--raw-output`、`--pretty`、`-c`、`-s/--slurp`、`-n/--null-i
 
 ```bash
 moon check   # 通过
-moon test    # Total tests: 29, passed: 29, failed: 0
+moon test    # Total tests: 30, passed: 30, failed: 0
 moon check --target native   # 通过（CLI 是 native-only，见下）
 python3 tests/golden.py _build/native/debug/build/main/main.exe
-# 95 cases, 0 failures — 对照真实 jq 1.7，见 tests/golden.py
+# 100 cases, 0 failures — 对照真实 jq 1.7，见 tests/golden.py
 
 echo '{"name":"Yan","score":95}' | moon run --target native main -- '.name'
 # "Yan"

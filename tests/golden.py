@@ -105,6 +105,11 @@ CASES = [
     ('{"a":5}', "reduce .a as $x (10; . + $x)"),
     ("[1,2]", "reduce .[] as $x ([]; . + [$x])"),
     ("[1]", "reduce (.[] , .[]) as $x (0; . + 1)"),
+    ('[{"a":2},{"a":1},{"a":2}]', "group_by(.a)"),
+    ("[3,1,2,1]", "group_by(.)"),
+    ("[]", "group_by(.)"),
+    ('[{"a":null},{"a":1},{"a":null}]', "group_by(.a)"),
+    ('[{"a":1},{"b":2}]', "group_by(.a)"),
 ]
 
 def run(cmd, inp):

@@ -356,6 +356,37 @@ pub fn eval_env(
       }
       [acc]
     }
+    GroupBy(f) =>
+      match input {
+        Arr(items) => {
+          // jq sorts by f first, then groups equal keys.
+          let sorted = items.copy()
+          sorted.sort_by(fn(a, b) {
+            eval_one_env(f, a, env).compare(eval_one_env(f, b, env))
+          })
+          let groups : Array[JVal] = []
+          let mut cur : Array[JVal] = []
+          let mut cur_key : JVal = Null
+          for item in sorted {
+            let k = eval_one_env(f, item, env)
+            if cur.length() == 0 {
+              cur.push(item)
+              cur_key = k
+            } else if k.compare(cur_key) == 0 {
+              cur.push(item)
+            } else {
+              groups.push(Arr(cur))
+              cur = [item]
+              cur_key = k
+            }
+          }
+          if cur.length() > 0 {
+            groups.push(Arr(cur))
+          }
+          [Arr(groups)]
+        }
+        _ => [Null]
+      }
     Interp(parts) => {
       // Cross-product of the parts: literal text appends
       // itself, an embedded filter appends one string per

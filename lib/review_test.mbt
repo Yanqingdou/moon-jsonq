@@ -474,6 +474,44 @@ test "p2: reduce" {
 }
 
 ///|
+test "p2: group_by" {
+  let arr = @lib.parse_json_or_null("[{\"a\": 2}, {\"a\": 1}, {\"a\": 2}]")
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter("group_by(.a)") |> unwrap(), arr).to_string(),
+    "[[{\"a\":1}],[{\"a\":2},{\"a\":2}]]",
+  )
+  let nums = @lib.parse_json_or_null("[3, 1, 2, 1]")
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter("group_by(.)") |> unwrap(), nums).to_string(),
+    "[[1,1],[2],[3]]",
+  )
+  let empty = @lib.parse_json_or_null("[]")
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter("group_by(.)") |> unwrap(), empty).to_string(),
+    "[]",
+  )
+  // Null keys sort first (jq total order).
+  let nulls = @lib.parse_json_or_null(
+    "[{\"a\": null}, {\"a\": 1}, {\"a\": null}]",
+  )
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter("group_by(.a)") |> unwrap(), nulls).to_string(),
+    "[[{\"a\":null},{\"a\":null}],[{\"a\":1}]]",
+  )
+  // Missing keys read as null, so they group together.
+  let mixed = @lib.parse_json_or_null("[{\"a\": 1}, {\"b\": 2}]")
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter("group_by(.a)") |> unwrap(), mixed).to_string(),
+    "[[{\"b\":2}],[{\"a\":1}]]",
+  )
+  // Non-array input is Null here (jq errors); it stays lenient.
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter("group_by(.)") |> unwrap(), @lib.Num(5.0)).to_string(),
+    "null",
+  )
+}
+
+///|
 test "p2: eval_env with --arg style bindings" {
   let env = [
     @lib.EnvEntry::new("name", @lib.Str("Yan")),

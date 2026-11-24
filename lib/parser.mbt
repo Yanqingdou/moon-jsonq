@@ -23,7 +23,7 @@
 /// never crashes the CLI — it prints `mq: <msg>` and exits 1.
 ///
 /// Not yet parsed (clear `Err`, see docs/PLAN.md):
-/// `def`, `group_by`, `test` (regex), `..`,
+/// `def`, `test` (regex), `..`,
 /// `getpath`.
 
 ///|
@@ -1126,7 +1126,8 @@ fn Parser::parse_ident(self : Parser, name : String) -> Filter raise ParseError 
     "sort_by" => SortBy(self.parse_call_arg("sort_by"))
     "split" => Split(self.parse_call_arg("split"))
     "reduce" => self.parse_reduce()
-    "def" | "group_by" | "test" | "getpath" | "paths" =>
+    "group_by" => GroupBy(self.parse_call_arg("group_by"))
+    "def" | "test" | "getpath" | "paths" =>
       raise ParseError(
         "'" + name + "' is not supported yet (P2) — see docs/PLAN.md",
       )

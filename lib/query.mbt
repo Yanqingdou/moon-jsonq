@@ -18,7 +18,7 @@
 ///   arithmetic `+ - * / %`, comparisons `== != < <= > >=`,
 ///   literals, string literals, `and` / `or`
 ///
-/// Not yet: `def`, `group_by`, `test` (regex),
+/// Not yet: `def`, `test` (regex),
 /// `..` (recursive descent),
 /// `getpath` / `paths`, module import. Those are listed in
 /// docs/PLAN.md as P2, with the reason for each deferral.
@@ -143,6 +143,9 @@ pub(all) enum Filter {
   /// `reduce exp as $x (init; update)` — fold `exp`'s
   /// outputs into one value, starting from `init`.
   Reduce(Filter, String, Filter, Filter)
+  /// `group_by(f)` — sort an array by `f`, then group
+  /// consecutive elements with equal `f` values.
+  GroupBy(Filter)
   /// A literal value, e.g. `42`, `"hi"`, `true`, `null`.
   Literal(JVal)
 }
