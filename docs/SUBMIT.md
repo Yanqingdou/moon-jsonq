@@ -7,8 +7,8 @@
 - [ ] 安装 MoonBit 工具链：https://www.moonbitlang.com/download/
 - [ ] `moon version` 能跑通
 - [x] `moon check` 通过（`moon check --target native`，CLI 是 native-only）
-- [x] `moon test` 通过（23/23，2026-11-24）
-- [x] 黄金测试通过：`python3 tests/golden.py` 45 条对照 jq 1.7，0 失败
+- [x] `moon test` 通过（31/31，2026-11-24）
+- [x] 黄金测试通过：`python3 tests/golden.py` 107 条对照 jq 1.7，0 失败
 - [x] 真实 CLI 能跑：`echo '{"name":"Yan"}' | moon run --target native main -- '.name'` → `"Yan"`；原生 binary：`moon build --target native main`
 - [x] 把 `moon.mod` 里的 `yan/moon-jsonq` 改成 `Yanqingdou/moon-jsonq`，`main/moon.pkg` 里的 import 同步改名（2026-11-24 已改，待重跑验证）
 - [ ] 把 `README.md` 里的仓库链接改成你的真实仓库地址
@@ -27,7 +27,7 @@ git push -u origin main
 
 - [x] 仓库是 **公开** 的，不是私有（2026-11-24 已建 Yanqingdou/moon-jsonq 公开库并推送）
 - [x] README 在仓库首页能正常显示（2026-11-24 已在 GitHub 页面核对）
-- [ ] 不要最后一天一次性 push，要保留持续提交记录（官网验收要求）
+- [x] 不要最后一天一次性 push，要保留持续提交记录（官网验收要求）——2026-11-24 已有 12 个提交并推送
 
 ## 官网申报
 
@@ -43,7 +43,7 @@ git push -u origin main
 ## 验收对照（官网 6 条）
 
 - [ ] MoonBit 为主：核心全部 MoonBit
-- [ ] 仓库公开：持续提交记录
+- [x] 仓库公开：持续提交记录（12 个提交，2026-11-24）
 - [ ] 能够运行：README 有 `moon run` / `moon test` / CLI 用法，每个例子可复制跑通
 - [ ] 工作有效：本期新增工作，不是旧项目改名
 - [ ] 开源合规：MIT 协议，README 写明复现 jq、参考手册、代码原创

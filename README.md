@@ -121,7 +121,7 @@ moon-jsonq/
 │   ├── moon.pkg        # 可执行包，native-only，import lib + @env/@stdio/@fs
 │   └── main.mbt        # mq CLI（async fn main）
 ├── tests/
-│   └── golden.py       # 对照真实 jq 1.7 的黄金测试（45 条）
+│   └── golden.py       # 对照真实 jq 1.7 的黄金测试（107 条）
 ├── examples/
 │   ├── 01-basic.md     # 15 个例子（jq 对照，已验证）
 │   └── data.json       # 演示数据
