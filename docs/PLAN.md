@@ -23,10 +23,16 @@
 
 ### P1 — 原定 12 月，2026-11-24 已提前完成大部分
 ✅ 算术 `+ - * / %`、比较 `== != < <= > >=`、`//`、`if-then-else`、`sort`、`sort_by`、`unique`、`min`、`max`、`add`、`type`、`tostring`、`tonumber`、`not`、`empty`、`and`/`or`、对象/数组构造 `{k: f}` / `[f]`、完整递归下降解析器、stdin / 文件输入、`--pretty`、`--raw-output`、`--slurp`、`--null-input`、`-f`、`keys` 排序、错误信息（`Result[Filter, String]` + CLI 退出码 1/2）。
-⏳ 留到 12 月：`group_by`、`test`（正则）、`def`、`reduce`、字符串插值。
+✅ 2026-11-24 当天又提前完成了原定 12 月的剩余项：`group_by`、`reduce`、字符串插值（见 P2 备注）。
 
-### P2 — 1 月
-模块导入、`--arg` / `--argjson`、切片 `.[a:b]`、`split` 等字符串函数、Wasm 在线演示、性能优化、jq 官方测试集抽测 50 条。
+### P2 — 原定 1 月，2026-11-24 已提前完成
+✅ 切片 `.[a:b]`（负索引、省略上下界、越界截断，数组与字符串）、`split(sep)`、字符串插值 `"\(expr)"`（含插值对象键）、`--arg` / `--argjson` CLI 选项、`$变量` 与 `as $x` 绑定、`reduce`、`group_by(f)`、`to_entries` / `from_entries` / `with_entries(f)`。
+验证：`moon test` 31/31，黄金测试 107 条 vs jq 1.7 全部通过（见 `tests/golden.py`），共 11 个提交（3 个基础 + 8 个功能提交）。
+
+### 仍未做（P3 / 未来）
+- `def` 自定义函数、`test`（正则）、`..` 递归下降、`getpath` / `paths`、模块导入。
+- **更新赋值** `.a |= …` / `.a = …` / `.a += …` 等：尚未实现，写了会明确报错（不是静默错答案）。jq 的典型写法 `with_entries(.value += 10)` 因此也暂不支持，需改用 `with_entries({key: .key, value: (.value * 10)})`。实现时注意 jq 的语义细节：`+=` 右侧用原始输入求值（`{"a":1,"b":10} | .a += .b` 得 11），`|` 侧用路径旧值；缺失路径会被创建（`.missing |= . + 1` 得 1）；`|= empty` 会删除该键。
+- Wasm 在线演示、性能优化、jq 官方测试集抽测 50 条。
 
 ### 明确不做
 完整 jq 1.7 全量语法、流式超大文件、正则全兼容。写进 README 的“非目标”。
@@ -38,12 +44,12 @@
 - `lib/eval.mbt`：纯函数求值器，无 I/O、无全局状态，可在 Wasm 跑。
 - `lib/parser.mbt`：词法器 + 递归下降解析器（优先级已对 jq 1.7 实测校准），`parse_filter` 返回 `Result[Filter, String]`。
 - `lib/json_io.mbt`：`@json.parse` <-> `JVal` 桥接已实现并验证（moon 0.1.20261119，`Json::number/string/…` 构造器 + `parse`/`stringify`）。
-- `main/main.mbt`：`mq` CLI，`async fn main`（native-only，`@stdio`/`@fs`），支持 stdin、文件、`-r`、`--pretty`、`-s`、`-n`、`-f`。
+- `main/main.mbt`：`mq` CLI，`async fn main`（native-only，`@stdio`/`@fs`），支持 stdin、文件、`-r`、`--pretty`、`-s`、`-n`、`-f`、`--arg` / `--argjson`。
 
 ## 4. 时间表
 
 ### 11 月 24–30 日：冲月度验收
-- 24 日：脚手架 + 工具链安装验证（`moon test` 15/15）+ P1 大部分提前完成（`moon test` 23/23，黄金测试 45 条 vs jq 1.7 全部通过，见 `tests/golden.py`）
+- 24 日：脚手架 + 工具链安装验证（`moon test` 15/15）+ P1 大部分提前完成（`moon test` 23/23，黄金测试 45 条 vs jq 1.7 全部通过，见 `tests/golden.py`）；当天又把 P1 剩余项与全部 P2 功能做完（`moon test` 31/31，黄金测试 107 条，11 个提交）
 - 25–27 日：补边界测试（`group_by` / `test` / `def` / `reduce` 选做）、README + 演示 + 录屏
 - 28 日：推公开 GitHub 仓库，持续提交
 - 29 日：官网填飞书问卷申报
@@ -52,7 +58,7 @@
 官网写 11 月赛季“报名与验收截止时间以官方通知为准”，赛观写 11 月 30 日，按 30 日赶最保险。
 
 ### 12 月：冲季度奖
-补 P1 过滤器，测试覆盖率 80%+，加 Wasm 演示和基准对比，写新手教程、速查表、差异表。
+P1/P2 功能已提前做完。剩余工作：Wasm 演示和基准对比，`def` / 更新赋值 / 正则 `test` 三选一补一个差异化功能，写新手教程、速查表、差异表。
 
 ### 1 月：冲季度评选
 修 Bug、补边界测试、优化错误提示和性能，准备终评材料。
