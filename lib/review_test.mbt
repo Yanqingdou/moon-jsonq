@@ -420,6 +420,60 @@ test "p2: variables and as binding" {
 }
 
 ///|
+test "p2: reduce" {
+  let arr = @lib.parse_json_or_null("[1, 2, 3]")
+  assert_eq(
+    @lib.eval_one(
+      @lib.parse_filter("reduce .[] as $x (0; . + $x)") |> unwrap(),
+      arr,
+    ).to_string(),
+    "6",
+  )
+  let empty = @lib.parse_json_or_null("[]")
+  assert_eq(
+    @lib.eval_one(
+      @lib.parse_filter("reduce .[] as $x (0; . + $x)") |> unwrap(),
+      empty,
+    ).to_string(),
+    "0",
+  )
+  let words = @lib.parse_json_or_null("[\"a\", \"b\"]")
+  assert_eq(
+    @lib.eval_one(
+      @lib.parse_filter("reduce .[] as $x (\"\"; . + $x)") |> unwrap(),
+      words,
+    ).to_string(),
+    "\"ab\"",
+  )
+  // The init is evaluated on the original input.
+  let five = @lib.parse_json_or_null("{\"a\": 5}")
+  assert_eq(
+    @lib.eval_one(
+      @lib.parse_filter("reduce .a as $x (10; . + $x)") |> unwrap(),
+      five,
+    ).to_string(),
+    "15",
+  )
+  // The accumulator can be an array; the exp can be a
+  // parenthesised multi-output filter.
+  assert_eq(
+    @lib.eval_one(
+      @lib.parse_filter("reduce .[] as $x ([]; . + [$x])") |> unwrap(),
+      arr,
+    ).to_string(),
+    "[1,2,3]",
+  )
+  let one = @lib.parse_json_or_null("[1]")
+  assert_eq(
+    @lib.eval_one(
+      @lib.parse_filter("reduce (.[] , .[]) as $x (0; . + 1)") |> unwrap(),
+      one,
+    ).to_string(),
+    "2",
+  )
+}
+
+///|
 test "p2: eval_env with --arg style bindings" {
   let env = [
     @lib.EnvEntry::new("name", @lib.Str("Yan")),

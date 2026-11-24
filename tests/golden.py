@@ -99,6 +99,12 @@ CASES = [
     ("null", "$x.a", ["--argjson", "x", '{"a":1}']),
     ("null", "$x", ["--argjson", "x", "bad"]),
     ('{"a":1}', '"\\($name)-\\(.a)"', ["--arg", "name", "x"]),
+    ("[1,2,3]", "reduce .[] as $x (0; . + $x)"),
+    ("[]", "reduce .[] as $x (0; . + $x)"),
+    ('["a","b"]', 'reduce .[] as $x (""; . + $x)'),
+    ('{"a":5}', "reduce .a as $x (10; . + $x)"),
+    ("[1,2]", "reduce .[] as $x ([]; . + [$x])"),
+    ("[1]", "reduce (.[] , .[]) as $x (0; . + 1)"),
 ]
 
 def run(cmd, inp):

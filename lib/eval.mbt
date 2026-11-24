@@ -341,6 +341,21 @@ pub fn eval_env(
       }
       outs
     }
+    Reduce(exp, name, init, update) => {
+      // Fold `exp`'s outputs into one value: the accumulator
+      // starts at `init` (evaluated on the original input),
+      // and each output feeds `update` with `.` set to the
+      // accumulator and `$name` to that output.
+      let mut acc = eval_one_env(init, input, env)
+      for v in eval_env(exp, input, env) {
+        let inner : Array[EnvEntry] = [EnvEntry::new(name, v)]
+        for e in env {
+          inner.push(e)
+        }
+        acc = eval_one_env(update, acc, inner)
+      }
+      [acc]
+    }
     Interp(parts) => {
       // Cross-product of the parts: literal text appends
       // itself, an embedded filter appends one string per

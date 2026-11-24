@@ -23,7 +23,7 @@
 /// never crashes the CLI — it prints `mq: <msg>` and exits 1.
 ///
 /// Not yet parsed (clear `Err`, see docs/PLAN.md):
-/// `def`, `reduce`, `group_by`, `test` (regex), `..`,
+/// `def`, `group_by`, `test` (regex), `..`,
 /// `getpath`.
 
 ///|
@@ -81,6 +81,7 @@ priv enum Token {
   Ge
   Alt
   Question
+  Semicolon
   Eof
 }
 
@@ -183,6 +184,7 @@ fn tokenize(text : String) -> Array[Token] raise ParseError {
               }
             '%' => tokens.push(Percent)
             '?' => tokens.push(Question)
+            ';' => tokens.push(Semicolon)
             '$' => tokens.push(Var(lexer.read_var()))
             '=' =>
               if lexer.peek() is Some('=') {
@@ -565,6 +567,7 @@ fn Parser::eat(self : Parser, tok : Token) -> Bool {
     | (Ge, Ge)
     | (Alt, Alt)
     | (Question, Question)
+    | (Semicolon, Semicolon)
     | (Dot, Dot)
     | (Eof, Eof) => {
       ignore(self.next())
@@ -1122,7 +1125,8 @@ fn Parser::parse_ident(self : Parser, name : String) -> Filter raise ParseError 
     "select" => Select(self.parse_call_arg("select"))
     "sort_by" => SortBy(self.parse_call_arg("sort_by"))
     "split" => Split(self.parse_call_arg("split"))
-    "def" | "reduce" | "group_by" | "test" | "getpath" | "paths" =>
+    "reduce" => self.parse_reduce()
+    "def" | "group_by" | "test" | "getpath" | "paths" =>
       raise ParseError(
         "'" + name + "' is not supported yet (P2) — see docs/PLAN.md",
       )
@@ -1155,6 +1159,28 @@ fn Parser::parse_call_arg(
   let arg = self.parse_pipe()
   self.expect(RParen, "')'")
   arg
+}
+
+///|
+/// `reduce exp as $x (init; update)`.
+/// The `exp` is a term (use parens for anything bigger,
+/// like jq: `reduce (.[] , .[]) as $x (…; …)`).
+fn Parser::parse_reduce(self : Parser) -> Filter raise ParseError {
+  let exp = self.parse_postfix()
+  match self.next() {
+    Ident("as") => ()
+    _ => raise ParseError("expected 'as' after 'reduce' expression")
+  }
+  let name = match self.next() {
+    Var(n) => n
+    _ => raise ParseError("expected '$name' after 'reduce … as'")
+  }
+  self.expect(LParen, "'(' after 'reduce … as $name'")
+  let init = self.parse_pipe()
+  self.expect(Semicolon, "';' in 'reduce … (init; update)'")
+  let update = self.parse_pipe()
+  self.expect(RParen, "')' after 'reduce … (init; update)'")
+  Reduce(exp, name, init, update)
 }
 
 ///|
