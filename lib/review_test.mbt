@@ -512,6 +512,65 @@ test "p2: group_by" {
 }
 
 ///|
+test "p2: to_entries / from_entries / with_entries" {
+  // to_entries on objects preserves insertion order.
+  let obj = @lib.parse_json_or_null("{\"b\": 2, \"a\": 1}")
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter("to_entries") |> unwrap(), obj).to_string(),
+    "[{\"key\":\"b\",\"value\":2},{\"key\":\"a\",\"value\":1}]",
+  )
+  let arr = @lib.parse_json_or_null("[10, 20]")
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter("to_entries") |> unwrap(), arr).to_string(),
+    "[{\"key\":0,\"value\":10},{\"key\":1,\"value\":20}]",
+  )
+  // from_entries accepts "key" or "name"; missing "value" is null.
+  let entries = @lib.parse_json_or_null(
+    "[{\"key\": \"a\", \"value\": 1}, {\"name\": \"b\"}]",
+  )
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter("from_entries") |> unwrap(), entries).to_string(),
+    "{\"a\":1,\"b\":null}",
+  )
+  // "key" wins over "name"; later duplicates win.
+  let dup = @lib.parse_json_or_null(
+    "[{\"key\": \"a\", \"name\": \"b\", \"value\": 1}, {\"key\": \"a\", \"value\": 2}]",
+  )
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter("from_entries") |> unwrap(), dup).to_string(),
+    "{\"a\":2}",
+  )
+  // with_entries is to_entries | map(f) | from_entries.
+  // (jq's canonical `.value += 10` example needs update
+  // assignment, which is not implemented yet — see
+  // docs/PLAN.md — so the equivalent object form is used.)
+  let vals = @lib.parse_json_or_null("{\"a\": 1, \"b\": 2}")
+  assert_eq(
+    @lib.eval_one(
+      @lib.parse_filter("with_entries({key: .key, value: (.value * 10)})")
+      |> unwrap(),
+      vals,
+    ).to_string(),
+    "{\"a\":10,\"b\":20}",
+  )
+  assert_eq(
+    @lib.eval_one(
+      @lib.parse_filter("with_entries(select(.key != \"a\"))") |> unwrap(),
+      vals,
+    ).to_string(),
+    "{\"b\":2}",
+  )
+  // Round-trip.
+  assert_eq(
+    @lib.eval_one(
+      @lib.parse_filter("to_entries | from_entries") |> unwrap(),
+      obj,
+    ).to_string(),
+    "{\"b\":2,\"a\":1}",
+  )
+}
+
+///|
 test "p2: eval_env with --arg style bindings" {
   let env = [
     @lib.EnvEntry::new("name", @lib.Str("Yan")),

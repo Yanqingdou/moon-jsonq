@@ -146,6 +146,16 @@ pub(all) enum Filter {
   /// `group_by(f)` — sort an array by `f`, then group
   /// consecutive elements with equal `f` values.
   GroupBy(Filter)
+  /// `to_entries` — an object becomes
+  /// `[{"key": k, "value": v}, …]` (insertion order); an
+  /// array becomes `[{"key": 0, "value": v0}, …]`.
+  ToEntries
+  /// `from_entries` — the inverse of `to_entries`; accepts
+  /// `"key"` or `"name"`, missing `"value"` means null,
+  /// later duplicates win.
+  FromEntries
+  /// `with_entries(f)` — `to_entries | map(f) | from_entries`.
+  WithEntries(Filter)
   /// A literal value, e.g. `42`, `"hi"`, `true`, `null`.
   Literal(JVal)
 }

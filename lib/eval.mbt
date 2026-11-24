@@ -387,6 +387,86 @@ pub fn eval_env(
         }
         _ => [Null]
       }
+    ToEntries =>
+      match input {
+        Obj(entries) => {
+          // Insertion order is preserved (see lib/json.mbt).
+          let out : Array[JVal] = []
+          for e in entries {
+            out.push(
+              Obj([
+                ObjEntry::new("key", Str(e.key)),
+                ObjEntry::new("value", e.value),
+              ]),
+            )
+          }
+          [Arr(out)]
+        }
+        Arr(items) => {
+          let out : Array[JVal] = []
+          let mut i = 0
+          while i < items.length() {
+            out.push(
+              Obj([
+                ObjEntry::new("key", Num(i.to_double())),
+                ObjEntry::new("value", items[i]),
+              ]),
+            )
+            i = i + 1
+          }
+          [Arr(out)]
+        }
+        _ => [Null]
+      }
+    FromEntries =>
+      match input {
+        Arr(items) => {
+          let mut entries : Array[ObjEntry] = []
+          for item in items {
+            match item {
+              Obj(es) => {
+                // "key" wins over "name"; a non-string key
+                // is skipped; a missing "value" is null.
+                let key = match entry_field(es, "key") {
+                  Some(Str(k)) => Some(k)
+                  _ =>
+                    match entry_field(es, "name") {
+                      Some(Str(k)) => Some(k)
+                      _ => None
+                    }
+                }
+                match key {
+                  Some(k) => {
+                    let v = match entry_field(es, "value") {
+                      Some(v) => v
+                      None => Null
+                    }
+                    entries = put_entry(entries, k, v)
+                  }
+                  None => ()
+                }
+              }
+              _ => ()
+            }
+          }
+          [Obj(entries)]
+        }
+        _ => [Null]
+      }
+    WithEntries(f) =>
+      match eval_env(ToEntries, input, env) {
+        [Arr(items)] => {
+          // to_entries | map(f) | from_entries.
+          let out : Array[JVal] = []
+          for item in items {
+            for v in eval_env(f, item, env) {
+              out.push(v)
+            }
+          }
+          eval_env(FromEntries, Arr(out), env)
+        }
+        _ => [Null]
+      }
     Interp(parts) => {
       // Cross-product of the parts: literal text appends
       // itself, an embedded filter appends one string per
@@ -523,6 +603,35 @@ fn add_values(a : JVal, b : JVal) -> JVal {
     (Obj(xs), Obj(ys)) => merge_objects(xs, ys)
     _ => Null
   }
+}
+
+///|
+/// Look up one field of an object's entries, as a `JVal?`.
+fn entry_field(entries : Array[ObjEntry], key : String) -> JVal? {
+  for e in entries {
+    if e.key == key {
+      return Some(e.value)
+    }
+  }
+  None
+}
+
+///|
+/// Insert or replace one entry; later entries win, and the
+/// surviving entry moves to the end (like jq's `from_entries`).
+fn put_entry(
+  entries : Array[ObjEntry],
+  key : String,
+  value : JVal,
+) -> Array[ObjEntry] {
+  let out : Array[ObjEntry] = []
+  for e in entries {
+    if e.key != key {
+      out.push(e)
+    }
+  }
+  out.push(ObjEntry::new(key, value))
+  out
 }
 
 ///|

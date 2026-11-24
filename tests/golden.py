@@ -110,6 +110,13 @@ CASES = [
     ("[]", "group_by(.)"),
     ('[{"a":null},{"a":1},{"a":null}]', "group_by(.a)"),
     ('[{"a":1},{"b":2}]', "group_by(.a)"),
+    ('{"b":2,"a":1}', "to_entries"),
+    ("[10,20]", "to_entries"),
+    ('[{"key":"a","value":1},{"name":"b"}]', "from_entries"),
+    ('[{"key":"a","name":"b","value":1},{"key":"a","value":2}]', "from_entries"),
+    ('{"a":1,"b":2}', "with_entries({key: .key, value: (.value * 10)})"),
+    ('{"a":1,"b":2}', 'with_entries(select(.key != "a"))'),
+    ('{"b":2,"a":1}', "to_entries | from_entries"),
 ]
 
 def run(cmd, inp):
