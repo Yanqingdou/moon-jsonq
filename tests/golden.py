@@ -71,7 +71,14 @@ CASES = [
     ('{"a":1,"b":2}', ".a, .b"),
     ('{"a":1}', ".a // 2 | . + 10"),
     ("[2,1]", "sort | .[]"),
-    ('"a,b,c"', 'split(",")'),  # not implemented - expect mq failure, jq ok
+    ('"a,b,c"', 'split(",")'),
+    ('"a,b,c"', 'split("")'),
+    ('"a,b,c"', 'split("x")'),
+    ('"a,b,"', 'split(",")'),
+    ('""', 'split(",")'),
+    ('""', 'split("")'),
+    ('"a"', 'split("a")'),
+    ('"a::b"', 'split("::")'),
 ]
 
 def run(cmd, inp):
@@ -92,10 +99,6 @@ fails = 0
 for inp, filt in CASES:
     mq_rc, mq_out, mq_err = run([MQ, filt], inp)
     jq_rc, jq_out, jq_err = run(["jq", "-c", filt], inp)
-    # Known unsupported: split - report as SKIP, not FAIL
-    if filt == 'split(",")':
-        print(f"SKIP (known P2): {filt}  mq_rc={mq_rc} jq_rc={jq_rc}")
-        continue
     mq_vals = parse_lines(mq_out)
     jq_vals = parse_lines(jq_out)
     if mq_rc != 0 or jq_rc != 0:

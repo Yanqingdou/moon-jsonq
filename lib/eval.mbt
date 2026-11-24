@@ -45,6 +45,25 @@ pub fn eval(filter : Filter, input : JVal) -> Array[JVal] {
       }
       [input.slice(lov, hiv)]
     }
+    Split(f) =>
+      match (input, eval_one(f, input)) {
+        (Str(s), Str(sep)) =>
+          // MoonBit's split already matches jq here:
+          // empty separator splits into characters, a
+          // trailing separator keeps a final empty string.
+          // One difference: "".split("") is [""] in MoonBit
+          // but [] in jq, so an empty input is always [].
+          if s == "" {
+            [Arr([])]
+          } else {
+            let parts : Array[JVal] = []
+            for part in s.split(sep) {
+              parts.push(Str(part.to_owned()))
+            }
+            [Arr(parts)]
+          }
+        _ => [Null]
+      }
     Iterate => input.iterate()
     Pipe(steps) => {
       let mut cur : Array[JVal] = [input]

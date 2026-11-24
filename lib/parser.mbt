@@ -845,6 +845,7 @@ fn Parser::parse_ident(self : Parser, name : String) -> Filter raise ParseError 
     "map" => Map(self.parse_call_arg("map"))
     "select" => Select(self.parse_call_arg("select"))
     "sort_by" => SortBy(self.parse_call_arg("sort_by"))
+    "split" => Split(self.parse_call_arg("split"))
     "def" | "reduce" | "group_by" | "test" | "getpath" | "paths" =>
       raise ParseError(
         "'" + name + "' is not supported yet (P2) — see docs/PLAN.md",

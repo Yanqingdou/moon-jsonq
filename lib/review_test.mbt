@@ -256,6 +256,47 @@ test "p2: slice .[a:b] on arrays and strings" {
 }
 
 ///|
+test "p2: split(sep)" {
+  let s = @lib.parse_json_or_null("\"a,b,c\"")
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter("split(\",\")") |> unwrap(), s).to_string(),
+    "[\"a\",\"b\",\"c\"]",
+  )
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter("split(\"\")") |> unwrap(), s).to_string(),
+    "[\"a\",\",\",\"b\",\",\",\"c\"]",
+  )
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter("split(\"x\")") |> unwrap(), s).to_string(),
+    "[\"a,b,c\"]",
+  )
+  let s2 = @lib.parse_json_or_null("\"a,b,\"")
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter("split(\",\")") |> unwrap(), s2).to_string(),
+    "[\"a\",\"b\",\"\"]",
+  )
+  let empty = @lib.parse_json_or_null("\"\"")
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter("split(\",\")") |> unwrap(), empty).to_string(),
+    "[]",
+  )
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter("split(\"\")") |> unwrap(), empty).to_string(),
+    "[]",
+  )
+  let one = @lib.parse_json_or_null("\"a\"")
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter("split(\"a\")") |> unwrap(), one).to_string(),
+    "[\"\",\"\"]",
+  )
+  // Non-string input is Null here (jq errors); it stays lenient.
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter("split(\",\")") |> unwrap(), @lib.Null).to_string(),
+    "null",
+  )
+}
+
+///|
 /// Helper: unwrap a parse result in tests, failing the test
 /// loudly if the filter did not parse.
 fn unwrap(r : Result[@lib.Filter, String]) -> @lib.Filter {

@@ -29,6 +29,7 @@ echo '{"name":"Yan","score":95}' | mq '.name'
 | `.`、`.name`、`.a.b` | 字段访问 | ✅ |
 | `.[0]`、`.[ -1]`、`.["k"]`、`.[expr]` | 数组索引，负数从后数 | ✅ |
 | `.[a:b]` | 切片，负索引、省略上下界、越界截断，字符串也支持 | ✅ |
+| `split(sep)` | 按分隔符切分字符串为数组 | ✅ |
 | `.[]` | 遍历数组 / 对象值 | ✅ |
 | `a \| b`、`a, b` | 管道、逗号，多输出 | ✅ |
 | `a // b` | 空值 / 假值时用右边 | ✅ |
@@ -49,11 +50,10 @@ CLI 选项：`-r/--raw-output`、`--pretty`、`-c`、`-s/--slurp`、`-n/--null-i
 
 ```bash
 moon check   # 通过
-moon test    # Total tests: 24, passed: 24, failed: 0
+moon test    # Total tests: 25, passed: 25, failed: 0
 moon check --target native   # 通过（CLI 是 native-only，见下）
 python3 tests/golden.py _build/native/debug/build/main/main.exe
-# 62 cases, 0 failures — 对照真实 jq 1.7，见 tests/golden.py
-# （另有 1 条已知 P2 跳过：split）
+# 69 cases, 0 failures — 对照真实 jq 1.7，见 tests/golden.py
 
 echo '{"name":"Yan","score":95}' | moon run --target native main -- '.name'
 # "Yan"

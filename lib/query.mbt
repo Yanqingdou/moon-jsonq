@@ -65,6 +65,8 @@ pub(all) enum Filter {
   /// `.[a:b]` — slice; each bound is `None` when omitted,
   /// or `Some(filter)` evaluated against the input.
   Slice(Filter?, Filter?)
+  /// `split(sep)` — split a string into an array of strings.
+  Split(Filter)
   /// `.["key"]` — field access by a string literal.
   IndexStr(String)
   /// `.[expr]` — index/key computed by a filter.
