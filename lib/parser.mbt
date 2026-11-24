@@ -2,7 +2,17 @@
 ///
 /// Grammar (precedence, lowest first):
 ///   pipe   := comma ('|' comma)*
-///   comma  := alt (',' alt)*
+///   comma  := assign (',' assign)*
+///   assign := path ('|='|'='|'+='|'-='|'*'|'/='|'%='|'//=') as
+///             — the path is a `.a.b[0][]` path (or a
+///             parenthesised comma of paths); the RHS is an
+///             `as`-level filter, so `|` and `,` after the RHS
+///             belong to the enclosing pipe/comma, like jq:
+///             `.a |= .+1 | .b` is `(.a |= .+1) | .b`.
+///             Object values `{k: v}` do NOT allow an
+///             unparenthesised assignment (jq rejects it too);
+///             write `{k: (.a |= 5)}` instead.
+///   as     := alt ('as' $x '|' pipe)?
 ///   alt    := or ('//' or)*
 ///   or     := and ('or' and)*
 ///   and    := cmp ('and' cmp)*
@@ -82,6 +92,14 @@ priv enum Token {
   Alt
   Question
   Semicolon
+  Assign
+  PipeAssign
+  PlusAssign
+  MinusAssign
+  StarAssign
+  SlashAssign
+  PercentAssign
+  AltAssign
   Eof
 }
 
@@ -161,6 +179,9 @@ fn tokenize(text : String) -> Array[Token] raise ParseError {
               if lexer.peek() is Some('|') {
                 ignore(lexer.advance())
                 tokens.push(Alt)
+              } else if lexer.peek() is Some('=') {
+                ignore(lexer.advance())
+                tokens.push(PipeAssign)
               } else {
                 tokens.push(Pipe)
               }
@@ -172,17 +193,49 @@ fn tokenize(text : String) -> Array[Token] raise ParseError {
             '}' => tokens.push(RBrace)
             '(' => tokens.push(LParen)
             ')' => tokens.push(RParen)
-            '+' => tokens.push(Plus)
-            '-' => tokens.push(Minus)
-            '*' => tokens.push(Star)
+            '+' =>
+              if lexer.peek() is Some('=') {
+                ignore(lexer.advance())
+                tokens.push(PlusAssign)
+              } else {
+                tokens.push(Plus)
+              }
+            '-' =>
+              if lexer.peek() is Some('=') {
+                ignore(lexer.advance())
+                tokens.push(MinusAssign)
+              } else {
+                tokens.push(Minus)
+              }
+            '*' =>
+              if lexer.peek() is Some('=') {
+                ignore(lexer.advance())
+                tokens.push(StarAssign)
+              } else {
+                tokens.push(Star)
+              }
             '/' =>
               if lexer.peek() is Some('/') {
                 ignore(lexer.advance())
-                tokens.push(Alt)
+                if lexer.peek() is Some('=') {
+                  ignore(lexer.advance())
+                  tokens.push(AltAssign)
+                } else {
+                  tokens.push(Alt)
+                }
+              } else if lexer.peek() is Some('=') {
+                ignore(lexer.advance())
+                tokens.push(SlashAssign)
               } else {
                 tokens.push(Slash)
               }
-            '%' => tokens.push(Percent)
+            '%' =>
+              if lexer.peek() is Some('=') {
+                ignore(lexer.advance())
+                tokens.push(PercentAssign)
+              } else {
+                tokens.push(Percent)
+              }
             '?' => tokens.push(Question)
             ';' => tokens.push(Semicolon)
             '$' => tokens.push(Var(lexer.read_var()))
@@ -191,7 +244,7 @@ fn tokenize(text : String) -> Array[Token] raise ParseError {
                 ignore(lexer.advance())
                 tokens.push(EqEq)
               } else {
-                raise ParseError("unexpected '=' — did you mean '=='?")
+                tokens.push(Assign)
               }
             '!' =>
               if lexer.peek() is Some('=') {
@@ -568,6 +621,14 @@ fn Parser::eat(self : Parser, tok : Token) -> Bool {
     | (Alt, Alt)
     | (Question, Question)
     | (Semicolon, Semicolon)
+    | (Assign, Assign)
+    | (PipeAssign, PipeAssign)
+    | (PlusAssign, PlusAssign)
+    | (MinusAssign, MinusAssign)
+    | (StarAssign, StarAssign)
+    | (SlashAssign, SlashAssign)
+    | (PercentAssign, PercentAssign)
+    | (AltAssign, AltAssign)
     | (Dot, Dot)
     | (Eof, Eof) => {
       ignore(self.next())
@@ -673,14 +734,119 @@ fn Parser::parse_pipe_no_comma(self : Parser) -> Filter raise ParseError {
 
 ///|
 fn Parser::parse_comma(self : Parser) -> Filter raise ParseError {
-  let parts : Array[Filter] = [self.parse_as()]
+  let parts : Array[Filter] = [self.parse_assign()]
   while self.eat(Comma) {
-    parts.push(self.parse_as())
+    parts.push(self.parse_assign())
   }
   if parts.length() == 1 {
     parts[0]
   } else {
     Comma(parts)
+  }
+}
+
+///|
+/// Update assignment: `path |= rhs`, `path = rhs`,
+/// `path += rhs`, … (see the grammar note at the top).
+/// The left side must be a path. We try parsing one
+/// speculatively: if no assignment operator follows, we
+/// rewind and parse the filter normally, so `.a + 1`,
+/// `.a | .b` and `.a as $x | …` are unaffected. The RHS
+/// is an `as`-level filter, so an unparenthesised `|` or
+/// `,` after it belongs to the enclosing pipe/comma.
+fn Parser::parse_assign(self : Parser) -> Filter raise ParseError {
+  match self.peek() {
+    Dot | LParen => {
+      let saved = self.pos
+      let path_filter = match self.peek() {
+        Dot => self.parse_dot()
+        _ => self.parse_term()
+      }
+      let op = match self.peek() {
+        PipeAssign => Some(UpdPipe)
+        Assign => Some(UpdSet)
+        PlusAssign => Some(UpdAdd)
+        MinusAssign => Some(UpdSub)
+        StarAssign => Some(UpdMul)
+        SlashAssign => Some(UpdDiv)
+        PercentAssign => Some(UpdMod)
+        AltAssign => Some(UpdAlt)
+        _ => None
+      }
+      match op {
+        Some(op) => {
+          ignore(self.next())
+          let rhs = self.parse_as()
+          match filter_to_paths(path_filter) {
+            Some(paths) => Update(paths, op, rhs)
+            None =>
+              raise ParseError(
+                "left-hand side of update assignment must be a path like '.a', '.a.b', '.[0]', '.[]' or '(.a, .b)'",
+              )
+          }
+        }
+        None => {
+          self.pos = saved
+          self.parse_as()
+        }
+      }
+    }
+    _ => self.parse_as()
+  }
+}
+
+///|
+/// Turn a filter parsed as a would-be assignment LHS into
+/// the list of paths it denotes, or `None` when it is not
+/// a path (e.g. `.a + 1`, `map(.)`, a bare literal).
+fn filter_to_paths(f : Filter) -> Array[Array[PathStep]]? {
+  match f {
+    Identity => Some([[]])
+    Field(name) => Some([[PathStep::Field(name)]])
+    Index(i) => Some([[PathStep::Index(i)]])
+    IndexStr(s) => Some([[PathStep::Field(s)]])
+    IndexExpr(e) => Some([[PathStep::IndexExpr(e)]])
+    Iterate => Some([[PathStep::Iterate]])
+    Slice(lo, hi) => Some([[PathStep::Slice(lo, hi)]])
+    Pipe(steps) => {
+      let path : Array[PathStep] = []
+      for step in steps {
+        match step_to_path(step) {
+          Some(p) => path.push(p)
+          None => return None
+        }
+      }
+      Some([path])
+    }
+    Comma(parts) => {
+      let paths : Array[Array[PathStep]] = []
+      for part in parts {
+        match filter_to_paths(part) {
+          Some(ps) =>
+            for p in ps {
+              paths.push(p)
+            }
+          None => return None
+        }
+      }
+      Some(paths)
+    }
+    _ => None
+  }
+}
+
+///|
+/// One pipe step as a path step, or `None` when it is not
+/// one (e.g. a literal or a builtin call).
+fn step_to_path(f : Filter) -> PathStep? {
+  match f {
+    Field(name) => Some(PathStep::Field(name))
+    Index(i) => Some(PathStep::Index(i))
+    IndexStr(s) => Some(PathStep::Field(s))
+    IndexExpr(e) => Some(PathStep::IndexExpr(e))
+    Iterate => Some(PathStep::Iterate)
+    Slice(lo, hi) => Some(PathStep::Slice(lo, hi))
+    _ => None
   }
 }
 
@@ -887,7 +1053,18 @@ fn Parser::parse_dot(self : Parser) -> Filter raise ParseError {
     Ident("as") => self.peek_at(1) is Var(_) && self.peek_at(2) is Pipe
     _ => false
   }
-  if !is_as_binding {
+  // Likewise, a bare `.` before a structural keyword is the
+  // identity filter, not a field named "end" / "then" / …:
+  // `if . then …` and `… else . end` need this (a field
+  // named "end" is still reachable as `.a.end`, where the
+  // suffix after a dot is parsed by `parse_dot_suffix`).
+  // This was a pre-existing parser bug, found while testing
+  // update assignment in `if` branches.
+  let is_keyword = match self.peek() {
+    Ident("end") | Ident("else") | Ident("elif") | Ident("then") => true
+    _ => false
+  }
+  if !is_as_binding && !is_keyword {
     match self.peek() {
       Ident(_) | StrLit(_) | LBracket => steps.push(self.parse_dot_first())
       Question => ignore(self.next())

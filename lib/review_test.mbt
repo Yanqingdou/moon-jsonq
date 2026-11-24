@@ -541,10 +541,17 @@ test "p2: to_entries / from_entries / with_entries" {
     "{\"a\":2}",
   )
   // with_entries is to_entries | map(f) | from_entries.
-  // (jq's canonical `.value += 10` example needs update
-  // assignment, which is not implemented yet — see
-  // docs/PLAN.md — so the equivalent object form is used.)
+  // The canonical `.value += 10` example now works (P3:
+  // update assignment); the equivalent object form is
+  // kept as a second check.
   let vals = @lib.parse_json_or_null("{\"a\": 1, \"b\": 2}")
+  assert_eq(
+    @lib.eval_one(
+      @lib.parse_filter("with_entries(.value += 10)") |> unwrap(),
+      vals,
+    ).to_string(),
+    "{\"a\":11,\"b\":12}",
+  )
   assert_eq(
     @lib.eval_one(
       @lib.parse_filter("with_entries({key: .key, value: (.value * 10)})")
@@ -567,6 +574,188 @@ test "p2: to_entries / from_entries / with_entries" {
       obj,
     ).to_string(),
     "{\"b\":2,\"a\":1}",
+  )
+}
+
+///|
+test "p3: update assignment" {
+  let ab = @lib.parse_json_or_null("{\"a\": 1, \"b\": 10}")
+  // `|=` runs the RHS on the old path value.
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".a |= . + 1") |> unwrap(), ab).to_string(),
+    "{\"a\":2,\"b\":10}",
+  )
+  // `+=` runs the RHS on the ORIGINAL input, not the old
+  // value: `.a += .b` is 1 + 10, not 1 + null.
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".a += .b") |> unwrap(), ab).to_string(),
+    "{\"a\":11,\"b\":10}",
+  )
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".a = .b") |> unwrap(), ab).to_string(),
+    "{\"a\":10,\"b\":10}",
+  )
+  // A missing path is created; `|=` with `empty` deletes.
+  let one = @lib.parse_json_or_null("{\"a\": 1}")
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".missing |= . + 1") |> unwrap(), one).to_string(),
+    "{\"a\":1,\"missing\":1}",
+  )
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".a |= empty") |> unwrap(), one).to_string(),
+    "{}",
+  )
+  // `=` with `empty` produces no output at all (jq: the
+  // whole result disappears); `|=` keeps the rest.
+  assert_eq(
+    @lib.eval_to_strings(@lib.parse_filter(".a = empty") |> unwrap(), one),
+    [],
+  )
+  // `=` fans out over RHS outputs; `|=` takes only the
+  // first RHS output.
+  assert_eq(
+    @lib.eval_to_strings(@lib.parse_filter(".a = (1, 2)") |> unwrap(), one),
+    ["{\"a\":1}", "{\"a\":2}"],
+  )
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".a |= (1, 2)") |> unwrap(), one).to_string(),
+    "{\"a\":1}",
+  )
+  // Nested paths, indexes, string keys, iterate.
+  let nested = @lib.parse_json_or_null("{\"a\": {\"b\": 1}}")
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".a.b |= . + 10") |> unwrap(), nested).to_string(),
+    "{\"a\":{\"b\":11}}",
+  )
+  let arr = @lib.parse_json_or_null("[1, 2, 3]")
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".[1] |= . + 10") |> unwrap(), arr).to_string(),
+    "[1,12,3]",
+  )
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".[] |= . + 10") |> unwrap(), arr).to_string(),
+    "[11,12,13]",
+  )
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".[] += 10") |> unwrap(), arr).to_string(),
+    "[11,12,13]",
+  )
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".[] |= empty") |> unwrap(), arr).to_string(),
+    "[]",
+  )
+  // Null creates containers; an out-of-range index pads
+  // with nulls; deleting a missing path changes nothing.
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".a.b |= 1") |> unwrap(), @lib.Null).to_string(),
+    "{\"a\":{\"b\":1}}",
+  )
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".[0] |= 1") |> unwrap(), @lib.Null).to_string(),
+    "[1]",
+  )
+  let two = @lib.parse_json_or_null("[1, 2]")
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".[5] |= 10") |> unwrap(), two).to_string(),
+    "[1,2,null,null,null,10]",
+  )
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".missing |= empty") |> unwrap(), one).to_string(),
+    "{\"a\":1}",
+  )
+  // Compound operators and `//=`.
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".a -= 1") |> unwrap(), one).to_string(),
+    "{\"a\":0}",
+  )
+  let six = @lib.parse_json_or_null("{\"a\": 6}")
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".a /= 2") |> unwrap(), six).to_string(),
+    "{\"a\":3}",
+  )
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".a *= 2") |> unwrap(), six).to_string(),
+    "{\"a\":12}",
+  )
+  let seven = @lib.parse_json_or_null("{\"a\": 7}")
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".a %= 3") |> unwrap(), seven).to_string(),
+    "{\"a\":1}",
+  )
+  let null_a = @lib.parse_json_or_null("{\"a\": null}")
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".a //= 5") |> unwrap(), null_a).to_string(),
+    "{\"a\":5}",
+  )
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".a //= 5") |> unwrap(), one).to_string(),
+    "{\"a\":1}",
+  )
+  assert_eq(
+    @lib.eval_to_strings(@lib.parse_filter(".a //= empty") |> unwrap(), one),
+    [],
+  )
+  // Slices: the replacement must be an array; `empty`
+  // removes the slice.
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".[0:2] |= [9, 9]") |> unwrap(), arr).to_string(),
+    "[9,9,3]",
+  )
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".[0:2] |= empty") |> unwrap(), arr).to_string(),
+    "[3]",
+  )
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".[0:2] += [9]") |> unwrap(), arr).to_string(),
+    "[1,2,9,3]",
+  )
+  // A slice assigned a non-array is a type error in jq;
+  // here it is Null, like the evaluator's other lenient
+  // type mistakes (see docs/PLAN.md).
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".[0:2] |= 9") |> unwrap(), arr).to_string(),
+    "null",
+  )
+  // Precedence: `|` and `,` bind outside the assignment,
+  // so `.a |= .+1 | .b` is `(.a |= .+1) | .b`.
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".a |= . + 1 | .b") |> unwrap(), ab).to_string(),
+    "10",
+  )
+  assert_eq(
+    @lib.eval_to_strings(@lib.parse_filter(".a |= . + 1, .b") |> unwrap(), ab),
+    ["{\"a\":2,\"b\":10}", "10"],
+  )
+  // A parenthesised comma of paths updates both.
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter("(.a, .b) |= . + 1") |> unwrap(), ab).to_string(),
+    "{\"a\":2,\"b\":11}",
+  )
+  // Update assignment inside `if` branches, and the
+  // headline example from docs/PLAN.md.
+  assert_eq(
+    @lib.eval_one(
+      @lib.parse_filter("if .a == 1 then .a |= 5 else . end") |> unwrap(),
+      one,
+    ).to_string(),
+    "{\"a\":5}",
+  )
+  let vals = @lib.parse_json_or_null("{\"a\": 1, \"b\": 2}")
+  assert_eq(
+    @lib.eval_one(
+      @lib.parse_filter("with_entries(.value += 10)") |> unwrap(),
+      vals,
+    ).to_string(),
+    "{\"a\":11,\"b\":12}",
+  )
+  // A bare `.` before `end` / `then` is identity, not a
+  // field named "end" (pre-existing parser bug, fixed here).
+  assert_eq(
+    @lib.eval_one(
+      @lib.parse_filter("if . then 1 else 2 end") |> unwrap(),
+      @lib.Bool(true),
+    ).to_string(),
+    "1",
   )
 }
 

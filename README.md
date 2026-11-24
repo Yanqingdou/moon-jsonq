@@ -36,6 +36,7 @@ echo '{"name":"Yan","score":95}' | mq '.name'
 | `group_by(f)` | 按 `f` 排序后分组 | ✅ |
 | `to_entries` / `from_entries` | 对象与 `[{key,value}]` 互转 | ✅ |
 | `with_entries(f)` | `to_entries \| map(f) \| from_entries` | ✅ |
+| `.a \|= f`、`.a = f`、`.a += f`（`-=`、`*=`、`/=`、`%=`、`//=`） | 更新赋值：缺失路径自动创建、`\|= empty` 删除该键、`.[]` 批量更新、切片 `.[a:b]` 更新；`+=` 右侧用原始输入求值 | ✅ |
 | `.[]` | 遍历数组 / 对象值 | ✅ |
 | `a \| b`、`a, b` | 管道、逗号，多输出 | ✅ |
 | `a // b` | 空值 / 假值时用右边 | ✅ |
@@ -56,10 +57,10 @@ CLI 选项：`-r/--raw-output`、`--pretty`、`-c`、`-s/--slurp`、`-n/--null-i
 
 ```bash
 moon check   # 通过
-moon test    # Total tests: 31, passed: 31, failed: 0
+moon test    # Total tests: 34, passed: 34, failed: 0
 moon check --target native   # 通过（CLI 是 native-only，见下）
 python3 tests/golden.py _build/native/debug/build/main/main.exe
-# 107 cases, 0 failures — 对照真实 jq 1.7，见 tests/golden.py
+# 188 cases, 0 failures — 对照真实 jq 1.7，见 tests/golden.py
 
 echo '{"name":"Yan","score":95}' | moon run --target native main -- '.name'
 # "Yan"
@@ -121,7 +122,7 @@ moon-jsonq/
 │   ├── moon.pkg        # 可执行包，native-only，import lib + @env/@stdio/@fs
 │   └── main.mbt        # mq CLI（async fn main）
 ├── tests/
-│   └── golden.py       # 对照真实 jq 1.7 的黄金测试（107 条）
+│   └── golden.py       # 对照真实 jq 1.7 的黄金测试（188 条）
 ├── examples/
 │   ├── 01-basic.md     # 15 个例子（jq 对照，已验证）
 │   └── data.json       # 演示数据
@@ -148,7 +149,7 @@ echo '[1,2,3]' | jq '.[]'
 
 ## 将来改进
 
-`def`、更新赋值（`.a |= …` / `.a += …`）、Wasm 在线演示等高级功能尚未支持，写了会明确报错，不会静默给错答案。详见 `docs/PLAN.md`。
+`def`、正则 `test`、`..` 递归下降、`getpath` / `paths`、Wasm 在线演示等高级功能尚未支持，写了会明确报错，不会静默给错答案。详见 `docs/PLAN.md`。更新赋值（`.a |= …` / `.a = …` / `.a += …`）已于 2026-11-24 实现（P3），见上表；已知差异见 `docs/PLAN.md`“仍未做”一节。
 
 ## 为什么复现 jq，而不是做个新工具
 

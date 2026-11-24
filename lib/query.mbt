@@ -66,6 +66,43 @@ pub(all) enum InterpPart {
 }
 
 ///|
+/// One step of an update-assignment path (`.a.b[0][]`, …).
+/// A path is a list of these steps; `[]` is the whole input
+/// (`.` itself, as in `. |= f`).
+pub(all) enum PathStep {
+  /// `.name` / `.["name"]` — object field.
+  Field(String)
+  /// `.[0]` / `.[-1]` — array index.
+  Index(Int32)
+  /// `.[expr]` — index/key computed by a filter, evaluated
+  /// against the value at that step (like a normal pipe step).
+  IndexExpr(Filter)
+  /// `.[]` — every element / value.
+  Iterate
+  /// `.[a:b]` — slice; bounds are `None` when omitted.
+  Slice(Filter?, Filter?)
+}
+
+///|
+/// Which update-assignment operator was written.
+pub(all) enum UpdateOp {
+  /// `|=` — RHS runs on the old path value.
+  UpdPipe
+  /// `=` — RHS runs on the original input.
+  UpdSet
+  /// `+=`, `-=`, `*=`, `/=`, `%=` — RHS runs on the
+  /// original input, then is combined with the old value.
+  UpdAdd
+  UpdSub
+  UpdMul
+  UpdDiv
+  UpdMod
+  /// `//=` — RHS runs on the original input; it replaces
+  /// the old value only when that value is false/null.
+  UpdAlt
+}
+
+///|
 /// A jq filter, as a tree.
 pub(all) enum Filter {
   /// `.` — identity, returns the input unchanged.
@@ -156,6 +193,11 @@ pub(all) enum Filter {
   FromEntries
   /// `with_entries(f)` — `to_entries | map(f) | from_entries`.
   WithEntries(Filter)
+  /// `path |= f` / `path = f` / `path += f` / … — update
+  /// assignment (see `PathStep` / `UpdateOp`). `paths` holds
+  /// one path for `.a.b`, several for `(.a, .b)`, and a
+  /// single empty path for `. |= f`.
+  Update(Array[Array[PathStep]], UpdateOp, Filter)
   /// A literal value, e.g. `42`, `"hi"`, `true`, `null`.
   Literal(JVal)
 }

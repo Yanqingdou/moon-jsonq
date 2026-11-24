@@ -268,6 +268,19 @@ fn clamp_bound(v : JVal, len : Int32, default : Int32) -> Int32 {
 }
 
 ///|
+/// Resolve slice bounds to clamped `[lo, hi]` indices for
+/// this value's length (arrays and strings; other values
+/// have length 0). Used by slice update in `eval.mbt`.
+pub fn JVal::slice_bounds(self : JVal, lo : JVal, hi : JVal) -> Array[Int32] {
+  let len = match self {
+    Arr(items) => items.length()
+    Str(s) => s.to_array().length()
+    _ => 0
+  }
+  [clamp_bound(lo, len, 0), clamp_bound(hi, len, len)]
+}
+
+///|
 /// Look up `key` in an object. Missing key -> `Null`, like jq's
 /// `.missing` (which returns `null`, it does not error).
 pub fn JVal::field(self : JVal, key : String) -> JVal {

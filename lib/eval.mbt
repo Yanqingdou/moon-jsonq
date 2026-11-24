@@ -467,6 +467,7 @@ pub fn eval_env(
         }
         _ => [Null]
       }
+    Update(paths, op, rhs) => eval_update(paths, op, rhs, input, env)
     Interp(parts) => {
       // Cross-product of the parts: literal text appends
       // itself, an embedded filter appends one string per
@@ -506,6 +507,383 @@ pub fn eval_env(
     }
     Literal(value) => [value]
   }
+}
+
+///|
+/// What a leaf update does to the value at a path.
+priv enum LeafOut {
+  Replace(JVal)
+  Delete
+}
+
+///|
+/// What one step of an update does to a value: a new value,
+/// a request to delete it from its parent, or a type error
+/// (the whole update then yields `Null`, like the
+/// evaluator's other lenient type mistakes).
+priv enum UpdateResult {
+  Updated(JVal)
+  Deleted
+  Failed
+}
+
+///|
+/// How a leaf value is computed from its old value.
+/// `PipeRhs` is `|=`: the RHS filter runs on the old
+/// value. `Combine` is `=` / `+=` / …: the RHS was already
+/// evaluated on the original input, and is combined here.
+priv enum Updater {
+  PipeRhs(Filter)
+  Combine(UpdateOp, JVal)
+}
+
+///|
+/// Evaluate an update assignment. `|=` produces one output
+/// (the RHS's first output per leaf; no output deletes the
+/// leaf). `=` / `+=` / … produce one output per RHS output,
+/// each evaluated on the original input.
+fn eval_update(
+  paths : Array[Array[PathStep]],
+  op : UpdateOp,
+  rhs : Filter,
+  input : JVal,
+  env : Array[EnvEntry],
+) -> Array[JVal] {
+  match op {
+    UpdPipe => {
+      let mut cur = input
+      for path in paths {
+        match apply_update(cur, path, 0, PipeRhs(rhs), env) {
+          Updated(v) => cur = v
+          Deleted =>
+            // The path was missing and the update deleted
+            // it: the input is unchanged — except for `.`
+            // itself, where deleting the root means no
+            // output at all (`. |= empty`).
+            if path.length() == 0 {
+              return []
+            }
+          Failed => return [Null]
+        }
+      }
+      [cur]
+    }
+    _ => {
+      let rhs_outs = eval_env(rhs, input, env)
+      if rhs_outs.length() == 0 {
+        // `.a = empty` and `.a //= empty` produce no
+        // output at all, even when the old value is truthy.
+        return []
+      }
+      let outs : Array[JVal] = []
+      for rv in rhs_outs {
+        let mut cur = input
+        let mut failed = false
+        let mut i = 0
+        while i < paths.length() && !failed {
+          match apply_update(cur, paths[i], 0, Combine(op, rv), env) {
+            Updated(v) => cur = v
+            Deleted => ()
+            Failed => failed = true
+          }
+          i = i + 1
+        }
+        if failed {
+          outs.push(Null)
+        } else {
+          outs.push(cur)
+        }
+      }
+      outs
+    }
+  }
+}
+
+///|
+/// Compute a leaf's new value from its old value.
+fn updater_apply(
+  updater : Updater,
+  old : JVal,
+  env : Array[EnvEntry],
+) -> LeafOut {
+  match updater {
+    PipeRhs(rhs) =>
+      match eval_env(rhs, old, env) {
+        [] => Delete
+        [first, ..] => Replace(first)
+      }
+    Combine(op, rv) => Replace(combine_values(op, old, rv))
+  }
+}
+
+///|
+/// Combine an old path value with an already-evaluated RHS
+/// value, for `=` / `+=` / `-=` / `*=` / `/=` / `%=` / `//=`.
+fn combine_values(op : UpdateOp, old : JVal, rv : JVal) -> JVal {
+  match op {
+    UpdPipe => old
+    UpdSet => rv
+    UpdAdd => add_values(old, rv)
+    UpdSub => eval_binop(Sub, old, rv)
+    UpdMul => eval_binop(Mul, old, rv)
+    UpdDiv => eval_binop(Div, old, rv)
+    UpdMod => eval_binop(Mod, old, rv)
+    UpdAlt => if old.is_truthy() { old } else { rv }
+  }
+}
+
+///|
+/// Apply an update to the value at `steps[idx..]` inside
+/// `node`, returning the updated node, `Deleted` when the
+/// node itself should be removed from its parent, or
+/// `Failed` on a type error (e.g. indexing a number).
+/// Missing intermediate values are created — an object for
+/// a field step, an array for an index/slice step — and a
+/// creation that is then deleted propagates `Deleted`, so
+/// `null | .a[0] |= empty` stays `null` instead of
+/// becoming `{"a": null}`.
+fn apply_update(
+  node : JVal,
+  steps : Array[PathStep],
+  idx : Int32,
+  updater : Updater,
+  env : Array[EnvEntry],
+) -> UpdateResult {
+  if idx >= steps.length() {
+    match updater_apply(updater, node, env) {
+      Replace(v) => Updated(v)
+      Delete => Deleted
+    }
+  } else {
+    match steps[idx] {
+      PathStep::Field(key) =>
+        match node {
+          Obj(entries) =>
+            match apply_update(node.field(key), steps, idx + 1, updater, env) {
+              Updated(v) => Updated(Obj(set_field(entries, key, v)))
+              Deleted => Updated(Obj(remove_field(entries, key)))
+              Failed => Failed
+            }
+          Null =>
+            match apply_update(Null, steps, idx + 1, updater, env) {
+              Updated(v) => Updated(Obj([ObjEntry::new(key, v)]))
+              Deleted => Deleted
+              Failed => Failed
+            }
+          _ => Failed
+        }
+      PathStep::Index(i) =>
+        match node {
+          Arr(items) => {
+            let len = items.length()
+            let resolved = if i < 0 { len + i } else { i }
+            if resolved < 0 {
+              Failed
+            } else if resolved < len {
+              match
+                apply_update(items[resolved], steps, idx + 1, updater, env) {
+                Updated(v) => {
+                  let out = items.copy()
+                  out[resolved] = v
+                  Updated(Arr(out))
+                }
+                Deleted => {
+                  let out : Array[JVal] = []
+                  let mut j = 0
+                  while j < len {
+                    if j != resolved {
+                      out.push(items[j])
+                    }
+                    j = j + 1
+                  }
+                  Updated(Arr(out))
+                }
+                Failed => Failed
+              }
+            } else {
+              match apply_update(Null, steps, idx + 1, updater, env) {
+                Updated(v) => {
+                  let out = items.copy()
+                  while out.length() < resolved {
+                    out.push(Null)
+                  }
+                  out.push(v)
+                  Updated(Arr(out))
+                }
+                Deleted => Updated(Arr(items))
+                Failed => Failed
+              }
+            }
+          }
+          Null =>
+            if i < 0 {
+              Failed
+            } else {
+              match apply_update(Null, steps, idx + 1, updater, env) {
+                Updated(v) => {
+                  let out : Array[JVal] = []
+                  while out.length() < i {
+                    out.push(Null)
+                  }
+                  out.push(v)
+                  Updated(Arr(out))
+                }
+                Deleted => Deleted
+                Failed => Failed
+              }
+            }
+          _ => Failed
+        }
+      PathStep::IndexExpr(f) => {
+        // The key is computed on the value at this step,
+        // like a normal pipe step, then re-dispatched as a
+        // field or index step.
+        let key = eval_one_env(f, node, env)
+        match key {
+          Num(n) => {
+            let new_steps = steps.copy()
+            new_steps[idx] = PathStep::Index(n.to_int())
+            apply_update(node, new_steps, idx, updater, env)
+          }
+          Str(s) => {
+            let new_steps = steps.copy()
+            new_steps[idx] = PathStep::Field(s)
+            apply_update(node, new_steps, idx, updater, env)
+          }
+          _ => Failed
+        }
+      }
+      PathStep::Iterate =>
+        match node {
+          Arr(items) => {
+            let out : Array[JVal] = []
+            for item in items {
+              match apply_update(item, steps, idx + 1, updater, env) {
+                Updated(v) => out.push(v)
+                Deleted => ()
+                Failed => return Failed
+              }
+            }
+            Updated(Arr(out))
+          }
+          Obj(entries) => {
+            let out : Array[ObjEntry] = []
+            for entry in entries {
+              match apply_update(entry.value, steps, idx + 1, updater, env) {
+                Updated(v) => out.push(ObjEntry::new(entry.key, v))
+                Deleted => ()
+                Failed => return Failed
+              }
+            }
+            Updated(Obj(out))
+          }
+          _ => Failed
+        }
+      PathStep::Slice(lo_f, hi_f) => {
+        let lo = match lo_f {
+          None => Null
+          Some(f) => eval_one_env(f, node, env)
+        }
+        let hi = match hi_f {
+          None => Null
+          Some(f) => eval_one_env(f, node, env)
+        }
+        match node {
+          Arr(items) => {
+            let bounds = node.slice_bounds(lo, hi)
+            let a = bounds[0]
+            let b = bounds[1]
+            match
+              apply_update(node.slice(lo, hi), steps, idx + 1, updater, env) {
+              Updated(newv) =>
+                match newv {
+                  Arr(new_items) =>
+                    Updated(Arr(splice_array(items, a, b, new_items)))
+                  _ => Failed
+                }
+              Deleted => Updated(Arr(splice_array(items, a, b, [])))
+              Failed => Failed
+            }
+          }
+          Null =>
+            // A slice of null is an empty array; updating
+            // it creates the array (or stays null when the
+            // update deletes it).
+            match apply_update(Arr([]), steps, idx + 1, updater, env) {
+              Updated(newv) =>
+                match newv {
+                  Arr(new_items) => Updated(Arr(new_items))
+                  _ => Failed
+                }
+              Deleted => Deleted
+              Failed => Failed
+            }
+          _ => Failed
+        }
+      }
+    }
+  }
+}
+
+///|
+/// Insert or replace one object entry, keeping the position
+/// of an existing key (a new key goes at the end).
+fn set_field(
+  entries : Array[ObjEntry],
+  key : String,
+  value : JVal,
+) -> Array[ObjEntry] {
+  let out : Array[ObjEntry] = []
+  let mut found = false
+  for entry in entries {
+    if entry.key == key {
+      out.push(ObjEntry::new(key, value))
+      found = true
+    } else {
+      out.push(entry)
+    }
+  }
+  if !found {
+    out.push(ObjEntry::new(key, value))
+  }
+  out
+}
+
+///|
+/// Remove one object entry, if present.
+fn remove_field(entries : Array[ObjEntry], key : String) -> Array[ObjEntry] {
+  let out : Array[ObjEntry] = []
+  for entry in entries {
+    if entry.key != key {
+      out.push(entry)
+    }
+  }
+  out
+}
+
+///|
+/// `items[0:a] + middle + items[b:]`, for slice update.
+fn splice_array(
+  items : Array[JVal],
+  a : Int32,
+  b : Int32,
+  middle : Array[JVal],
+) -> Array[JVal] {
+  let out : Array[JVal] = []
+  let mut i = 0
+  while i < a {
+    out.push(items[i])
+    i = i + 1
+  }
+  for x in middle {
+    out.push(x)
+  }
+  let mut j = b
+  while j < items.length() {
+    out.push(items[j])
+    j = j + 1
+  }
+  out
 }
 
 ///|
