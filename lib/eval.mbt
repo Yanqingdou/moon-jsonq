@@ -1,6 +1,6 @@
 /// moon-jsonq: filter evaluator.
 ///
-/// `eval(filter, input)` is the heart of the project. Everything
+/// `eval_env(filter, input, env)` is the heart of the project. Everything
 /// else — the parser in `parser.mbt`, the CLI in `main/main.mbt`,
 /// the Wasm demo in P2 — is a thin wrapper around this function.
 ///
@@ -19,15 +19,56 @@
 ///    as `Null`; if it produces 2+, we take the first.
 
 ///|
+/// One variable binding in the evaluator environment.
+/// The environment is a list, newest binding first, so a
+/// lookup finds the innermost binding (shadowing works).
+/// `--arg` variables start in the list; `as` prepends.
+pub(all) struct EnvEntry {
+  name : String
+  value : JVal
+}
+
+///|
+pub fn EnvEntry::new(name : String, value : JVal) -> EnvEntry {
+  { name, value, }
+}
+
+///|
+/// Look a variable up in the environment, innermost first.
+/// Returns `None` when the variable is not bound; the
+/// evaluator treats that as `Null` (jq rejects it at
+/// compile time, we stay lenient at run time).
+pub fn env_lookup(env : Array[EnvEntry], name : String) -> JVal? {
+  for entry in env {
+    if entry.name == name {
+      return Some(entry.value)
+    }
+  }
+  None
+}
+
+///|
 /// Evaluate a filter on one input value, return all outputs.
+/// Thin wrapper with an empty environment; `--arg` variables
+/// and `as` bindings go through `eval_env`.
 pub fn eval(filter : Filter, input : JVal) -> Array[JVal] {
+  eval_env(filter, input, [])
+}
+
+///|
+/// Evaluate a filter with a variable environment.
+pub fn eval_env(
+  filter : Filter,
+  input : JVal,
+  env : Array[EnvEntry],
+) -> Array[JVal] {
   match filter {
     Identity => [input]
     Field(name) => [input.field(name)]
     Index(i) => [input.index(i)]
     IndexStr(key) => [input.field(key)]
     IndexExpr(f) => {
-      let key = eval_one(f, input)
+      let key = eval_one_env(f, input, env)
       match key {
         Num(n) => [input.index(n.to_int())]
         Str(s) => [input.field(s)]
@@ -37,16 +78,16 @@ pub fn eval(filter : Filter, input : JVal) -> Array[JVal] {
     Slice(lo, hi) => {
       let lov = match lo {
         None => Null
-        Some(f) => eval_one(f, input)
+        Some(f) => eval_one_env(f, input, env)
       }
       let hiv = match hi {
         None => Null
-        Some(f) => eval_one(f, input)
+        Some(f) => eval_one_env(f, input, env)
       }
       [input.slice(lov, hiv)]
     }
     Split(f) =>
-      match (input, eval_one(f, input)) {
+      match (input, eval_one_env(f, input, env)) {
         (Str(s), Str(sep)) =>
           // MoonBit's split already matches jq here:
           // empty separator splits into characters, a
@@ -70,7 +111,7 @@ pub fn eval(filter : Filter, input : JVal) -> Array[JVal] {
       for step in steps {
         let next : Array[JVal] = []
         for value in cur {
-          for out in eval(step, value) {
+          for out in eval_env(step, value, env) {
             next.push(out)
           }
         }
@@ -81,14 +122,14 @@ pub fn eval(filter : Filter, input : JVal) -> Array[JVal] {
     Comma(parts) => {
       let out : Array[JVal] = []
       for part in parts {
-        for value in eval(part, input) {
+        for value in eval_env(part, input, env) {
           out.push(value)
         }
       }
       out
     }
     Alt(a, b) => {
-      let outs = eval(a, input)
+      let outs = eval_env(a, input, env)
       let mut use_b = true
       for out in outs {
         if out.is_truthy() {
@@ -96,7 +137,7 @@ pub fn eval(filter : Filter, input : JVal) -> Array[JVal] {
         }
       }
       if use_b || outs.length() == 0 {
-        eval(b, input)
+        eval_env(b, input, env)
       } else {
         outs
       }
@@ -105,28 +146,28 @@ pub fn eval(filter : Filter, input : JVal) -> Array[JVal] {
       // jq: if either side produces several values, every
       // combination is produced (e.g. `.[] + 10` on [1,2]).
       let outs : Array[JVal] = []
-      for av in eval(a, input) {
-        for bv in eval(b, input) {
+      for av in eval_env(a, input, env) {
+        for bv in eval_env(b, input, env) {
           outs.push(eval_binop(op, av, bv))
         }
       }
       outs
     }
     Neg(f) =>
-      match eval_one(f, input) {
+      match eval_one_env(f, input, env) {
         Num(n) => [Num(0.0 - n)]
         _ => [Null]
       }
     If(cond, then_f, else_f) =>
-      if eval_one(cond, input).is_truthy() {
-        eval(then_f, input)
+      if eval_one_env(cond, input, env).is_truthy() {
+        eval_env(then_f, input, env)
       } else {
-        eval(else_f, input)
+        eval_env(else_f, input, env)
       }
     ArrayCons(parts) => {
       let out : Array[JVal] = []
       for part in parts {
-        for value in eval(part, input) {
+        for value in eval_env(part, input, env) {
           out.push(value)
         }
       }
@@ -137,8 +178,11 @@ pub fn eval(filter : Filter, input : JVal) -> Array[JVal] {
       for field in fields {
         // The key is a filter: usually a literal string, or
         // an interpolation for `{"\(.k)": v}`.
-        match eval_one(field.key, input) {
-          Str(k) => entries.push(ObjEntry::new(k, eval_one(field.value, input)))
+        match eval_one_env(field.key, input, env) {
+          Str(k) =>
+            entries.push(
+              ObjEntry::new(k, eval_one_env(field.value, input, env)),
+            )
           // A non-string key is an error in jq; here the
           // entry is skipped, like the evaluator's other
           // lenient type mistakes.
@@ -155,7 +199,7 @@ pub fn eval(filter : Filter, input : JVal) -> Array[JVal] {
           // (e.g. map(select(. > 2)) drops the small ones).
           let out : Array[JVal] = []
           for item in items {
-            for value in eval(f, item) {
+            for value in eval_env(f, item, env) {
               out.push(value)
             }
           }
@@ -164,7 +208,7 @@ pub fn eval(filter : Filter, input : JVal) -> Array[JVal] {
         _ => [Null]
       }
     Select(f) => {
-      let cond = eval_one(f, input)
+      let cond = eval_one_env(f, input, env)
       if cond.is_truthy() {
         [input]
       } else {
@@ -186,7 +230,9 @@ pub fn eval(filter : Filter, input : JVal) -> Array[JVal] {
       match input {
         Arr(items) => {
           let sorted = items.copy()
-          sorted.sort_by(fn(a, b) { eval_one(f, a).compare(eval_one(f, b)) })
+          sorted.sort_by(fn(a, b) {
+            eval_one_env(f, a, env).compare(eval_one_env(f, b, env))
+          })
           [Arr(sorted)]
         }
         _ => [Null]
@@ -275,6 +321,26 @@ pub fn eval(filter : Filter, input : JVal) -> Array[JVal] {
       }
     Not => [Bool(!input.is_truthy())]
     Empty => []
+    Var(name) =>
+      match env_lookup(env, name) {
+        Some(v) => [v]
+        None => [Null]
+      }
+    Bind(exp, name, body) => {
+      // Run `body` once per output of `exp`, with `$name`
+      // bound to that output; the input is unchanged.
+      let outs : Array[JVal] = []
+      for v in eval_env(exp, input, env) {
+        let inner : Array[EnvEntry] = [EnvEntry::new(name, v)]
+        for e in env {
+          inner.push(e)
+        }
+        for out in eval_env(body, input, inner) {
+          outs.push(out)
+        }
+      }
+      outs
+    }
     Interp(parts) => {
       // Cross-product of the parts: literal text appends
       // itself, an embedded filter appends one string per
@@ -294,7 +360,7 @@ pub fn eval(filter : Filter, input : JVal) -> Array[JVal] {
           Expr(f) => {
             let next : Array[String] = []
             for s in acc {
-              for v in eval(f, input) {
+              for v in eval_env(f, input, env) {
                 let piece = match v {
                   Str(x) => x
                   _ => v.to_string()
@@ -438,11 +504,22 @@ fn merge_objects(xs : Array[ObjEntry], ys : Array[ObjEntry]) -> JVal {
 
 ///|
 /// Evaluate a filter and take a single output.
-/// Used by `map`, `select`, `sort_by`, and binary operators.
-/// If a filter produces 0 outputs, we treat it as `Null`;
-/// if it produces 2+, we take the first.
+/// Thin wrapper with an empty environment; see `eval_one_env`.
 pub fn eval_one(filter : Filter, input : JVal) -> JVal {
-  let outs = eval(filter, input)
+  eval_one_env(filter, input, [])
+}
+
+///|
+/// Evaluate a filter and take a single output, with a
+/// variable environment. Used by `map`, `select`, `sort_by`,
+/// and binary operators. If a filter produces 0 outputs,
+/// we treat it as `Null`; if it produces 2+, we take the first.
+pub fn eval_one_env(
+  filter : Filter,
+  input : JVal,
+  env : Array[EnvEntry],
+) -> JVal {
+  let outs = eval_env(filter, input, env)
   if outs.length() == 0 {
     Null
   } else {

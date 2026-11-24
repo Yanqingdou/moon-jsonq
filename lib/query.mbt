@@ -19,7 +19,7 @@
 ///   literals, string literals, `and` / `or`
 ///
 /// Not yet: `def`, `reduce`, `group_by`, `test` (regex),
-/// `..` (recursive descent), `$variables`,
+/// `..` (recursive descent),
 /// `getpath` / `paths`, module import. Those are listed in
 /// docs/PLAN.md as P2, with the reason for each deferral.
 
@@ -135,6 +135,11 @@ pub(all) enum Filter {
   /// `"…\(expr)…"` — string interpolation; one output per
   /// output of the embedded filters (like jq).
   Interp(Array[InterpPart])
+  /// `$x` — read a bound variable.
+  Var(String)
+  /// `exp as $x | body` — run `body` once per output of
+  /// `exp`, with `$x` bound to that output (input unchanged).
+  Bind(Filter, String, Filter)
   /// A literal value, e.g. `42`, `"hi"`, `true`, `null`.
   Literal(JVal)
 }

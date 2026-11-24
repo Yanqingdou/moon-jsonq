@@ -355,6 +355,71 @@ test "p2: string interpolation" {
 }
 
 ///|
+test "p2: variables and as binding" {
+  let arr = @lib.parse_json_or_null("[1, 2, 3]")
+  assert_eq(
+    @lib.eval_to_strings(
+      @lib.parse_filter(".[] as $x | $x * 2") |> unwrap(),
+      arr,
+    ),
+    ["2", "4", "6"],
+  )
+  assert_eq(
+    @lib.eval_one(
+      @lib.parse_filter("1 as $x | 2 as $y | $x + $y") |> unwrap(),
+      @lib.Null,
+    ).to_string(),
+    "3",
+  )
+  // `as` binds tighter than `,`: `.a, (.b as $x | $x + 10)`.
+  let ab = @lib.parse_json_or_null("{\"a\": 1, \"b\": 2}")
+  assert_eq(
+    @lib.eval_to_strings(
+      @lib.parse_filter(".a, .b as $x | $x + 10") |> unwrap(),
+      ab,
+    ),
+    ["1", "12"],
+  )
+  // A bound variable survives later pipes.
+  let five = @lib.parse_json_or_null("{\"a\": 5}")
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(". as $x | .a | $x") |> unwrap(), five).to_string(),
+    "{\"a\":5}",
+  )
+  // Inner bindings shadow outer ones.
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".a as $x | .b as $x | $x") |> unwrap(), ab).to_string(),
+    "2",
+  )
+  // Variables work with field suffixes and in strings.
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(". as $x | $x.a") |> unwrap(), five).to_string(),
+    "5",
+  )
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(". as $x | \"\\($x.a)\"") |> unwrap(), five).to_string(),
+    "\"5\"",
+  )
+  // An unbound variable is Null here (jq rejects it at
+  // compile time); the filter still parses and runs.
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter("$nope") |> unwrap(), @lib.Null).to_string(),
+    "null",
+  )
+  // Destructuring `as` is a clear error, not a wrong answer.
+  match @lib.parse_filter(". as {$a} | $a") {
+    Ok(_) => assert_eq(true, false)
+    Err(_) => assert_eq(true, true)
+  }
+  // `.as` is still the field "as"; only `. as $x | …` binds.
+  let as_field = @lib.parse_json_or_null("{\"as\": 1}")
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".as") |> unwrap(), as_field).to_string(),
+    "1",
+  )
+}
+
+///|
 /// Helper: unwrap a parse result in tests, failing the test
 /// loudly if the filter did not parse.
 fn unwrap(r : Result[@lib.Filter, String]) -> @lib.Filter {

@@ -24,7 +24,7 @@
 ///
 /// Not yet parsed (clear `Err`, see docs/PLAN.md):
 /// `def`, `reduce`, `group_by`, `test` (regex), `..`,
-/// `$variables`, `getpath`.
+/// `getpath`.
 
 ///|
 pub(all) suberror ParseError {
@@ -58,6 +58,7 @@ priv enum Token {
   Ident(String)
   StrLit(String)
   NumLit(Double)
+  Var(String)
   Pipe
   Comma
   Colon
@@ -182,6 +183,7 @@ fn tokenize(text : String) -> Array[Token] raise ParseError {
               }
             '%' => tokens.push(Percent)
             '?' => tokens.push(Question)
+            '$' => tokens.push(Var(lexer.read_var()))
             '=' =>
               if lexer.peek() is Some('=') {
                 ignore(lexer.advance())
@@ -250,6 +252,21 @@ fn Lexer::read_ident(self : Lexer) -> String {
         ((c.is_ascii_alphabetic() || c.is_ascii_digit()) || c == '_') {
     chars.push(c)
     ignore(self.advance())
+  }
+  String::from_array(chars)
+}
+
+///|
+/// Read a variable name after `$`: `$x`, `$foo_bar`.
+fn Lexer::read_var(self : Lexer) -> String raise ParseError {
+  let chars : Array[Char] = []
+  while self.peek() is Some(c) &&
+        ((c.is_ascii_alphabetic() || c.is_ascii_digit()) || c == '_') {
+    chars.push(c)
+    ignore(self.advance())
+  }
+  if chars.length() == 0 {
+    raise ParseError("expected a variable name after '$'")
   }
   String::from_array(chars)
 }
@@ -503,6 +520,16 @@ fn Parser::peek(self : Parser) -> Token {
 }
 
 ///|
+fn Parser::peek_at(self : Parser, n : Int32) -> Token {
+  let i = self.pos + n
+  if i < self.tokens.length() {
+    self.tokens[i]
+  } else {
+    Eof
+  }
+}
+
+///|
 fn Parser::next(self : Parser) -> Token {
   let t = self.peek()
   if self.pos < self.tokens.length() {
@@ -572,14 +599,67 @@ fn Parser::parse_pipe(self : Parser) -> Filter raise ParseError {
 }
 
 ///|
+/// `exp as $x | body`. Binds tighter than `,` (like jq:
+/// `.a, .b as $x | $x + 10` is `.a, (.b as $x | $x + 10)`),
+/// and the body is a full filter.
+fn Parser::parse_as(self : Parser) -> Filter raise ParseError {
+  let exp = self.parse_alt()
+  match self.peek() {
+    Ident("as") => {
+      ignore(self.next())
+      match self.peek() {
+        Var(name) => {
+          ignore(self.next())
+          self.expect(Pipe, "'|' after 'as $name'")
+          let body = self.parse_pipe()
+          Bind(exp, name, body)
+        }
+        LBracket | LBrace =>
+          raise ParseError(
+            "destructuring 'as [$x, …]' / 'as {…}' is not supported yet",
+          )
+        _ => raise ParseError("expected '$name' after 'as'")
+      }
+    }
+    _ => exp
+  }
+}
+
+///|
+/// Like `parse_as`, but the body stops at a top-level `,`.
+/// Used for object values `{k: v, …}`.
+fn Parser::parse_as_no_comma(self : Parser) -> Filter raise ParseError {
+  let exp = self.parse_alt()
+  match self.peek() {
+    Ident("as") => {
+      ignore(self.next())
+      match self.peek() {
+        Var(name) => {
+          ignore(self.next())
+          self.expect(Pipe, "'|' after 'as $name'")
+          let body = self.parse_pipe_no_comma()
+          Bind(exp, name, body)
+        }
+        LBracket | LBrace =>
+          raise ParseError(
+            "destructuring 'as [$x, …]' / 'as {…}' is not supported yet",
+          )
+        _ => raise ParseError("expected '$name' after 'as'")
+      }
+    }
+    _ => exp
+  }
+}
+
+///|
 /// Like `parse_pipe`, but the operands are `parse_alt`,
 /// not `parse_comma`. Used for object values `{k: v, …}`,
 /// where a top-level `,` separates fields instead of
 /// being the comma operator.
 fn Parser::parse_pipe_no_comma(self : Parser) -> Filter raise ParseError {
-  let parts : Array[Filter] = [self.parse_alt()]
+  let parts : Array[Filter] = [self.parse_as_no_comma()]
   while self.eat(Pipe) {
-    parts.push(self.parse_alt())
+    parts.push(self.parse_as_no_comma())
   }
   if parts.length() == 1 {
     parts[0]
@@ -590,9 +670,9 @@ fn Parser::parse_pipe_no_comma(self : Parser) -> Filter raise ParseError {
 
 ///|
 fn Parser::parse_comma(self : Parser) -> Filter raise ParseError {
-  let parts : Array[Filter] = [self.parse_alt()]
+  let parts : Array[Filter] = [self.parse_as()]
   while self.eat(Comma) {
-    parts.push(self.parse_alt())
+    parts.push(self.parse_as())
   }
   if parts.length() == 1 {
     parts[0]
@@ -797,10 +877,19 @@ fn Parser::parse_dot(self : Parser) -> Filter raise ParseError {
   }
   let steps : Array[Filter] = []
   // First suffix, if any.
-  match self.peek() {
-    Ident(_) | StrLit(_) | LBracket => steps.push(self.parse_dot_first())
-    Question => ignore(self.next())
-    _ => ()
+  // `. as $x | …` is the identity filter followed by a
+  // binding, not the field "as": only treat `as` as a field
+  // when it is not followed by `$var |`.
+  let is_as_binding = match self.peek() {
+    Ident("as") => self.peek_at(1) is Var(_) && self.peek_at(2) is Pipe
+    _ => false
+  }
+  if !is_as_binding {
+    match self.peek() {
+      Ident(_) | StrLit(_) | LBracket => steps.push(self.parse_dot_first())
+      Question => ignore(self.next())
+      _ => ()
+    }
   }
   while true {
     match self.peek() {
@@ -925,6 +1014,10 @@ fn Parser::parse_term(self : Parser) -> Filter raise ParseError {
     StrLit(raw) => {
       ignore(self.next())
       parse_str_lit(raw)
+    }
+    Var(name) => {
+      ignore(self.next())
+      Var(name)
     }
     Ident(name) => self.parse_ident(name)
     _ =>
