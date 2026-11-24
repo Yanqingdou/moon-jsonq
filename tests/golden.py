@@ -50,7 +50,24 @@ CASES = [
     ('{"x":1}', ".x == 1"),
     ('{"x":1}', ".x != 1"),
     ('{"x":1}', ".x < 2"),
-    ("[1,2,3]", ".[0:2]"),  # slice: NOT supported yet, both should fail or differ - see note
+    ("[1,2,3]", ".[0:2]"),
+    ("[0,1,2,3,4]", ".[1:3]"),
+    ("[0,1,2,3,4]", ".[2:]"),
+    ("[0,1,2,3,4]", ".[:2]"),
+    ("[0,1,2,3,4]", ".[-2:]"),
+    ("[0,1,2,3,4]", ".[:-1]"),
+    ("[0,1,2,3,4]", ".[10:20]"),
+    ("[0,1,2,3,4]", ".[-10:2]"),
+    ("[0,1,2,3,4]", ".[3:1]"),
+    ('"abcdef"', ".[1:3]"),
+    ('"abcdef"', ".[-2:]"),
+    ("[0,1,2,3]", ".[1:null]"),
+    ("[0,1,2,3]", ".[null:2]"),
+    ("[0,1,2,3]", ".[0:1+1]"),
+    ("[0,1,2,3]", ".[1.5:3]"),
+    ("[0,1,2,3]", ".[-1.5:3]"),
+    ("null", ".[0:1]"),
+    ("[0,1,2,3]", ".[0:length]"),
     ('{"a":1,"b":2}', ".a, .b"),
     ('{"a":1}', ".a // 2 | . + 10"),
     ("[2,1]", "sort | .[]"),
@@ -75,8 +92,8 @@ fails = 0
 for inp, filt in CASES:
     mq_rc, mq_out, mq_err = run([MQ, filt], inp)
     jq_rc, jq_out, jq_err = run(["jq", "-c", filt], inp)
-    # Known unsupported: slice and split - report as SKIP, not FAIL
-    if filt in (".[0:2]", 'split(",")'):
+    # Known unsupported: split - report as SKIP, not FAIL
+    if filt == 'split(",")':
         print(f"SKIP (known P2): {filt}  mq_rc={mq_rc} jq_rc={jq_rc}")
         continue
     mq_vals = parse_lines(mq_out)

@@ -674,19 +674,47 @@ fn Parser::parse_dot_first(self : Parser) -> Filter raise ParseError {
 
 ///|
 /// Parse the inside of `.[ … ]`. The opening `[` was consumed.
+/// Handles `.[0]`, `.["k"]`, `.[expr]`, `.[]`, and slices
+/// `.[a:b]`, `.[a:]`, `.[:b]` with optional expression bounds.
+/// `.[ : ]` with both bounds omitted is a syntax error in jq,
+/// so it is an error here too.
 fn Parser::parse_bracket(self : Parser) -> Filter raise ParseError {
   if self.eat(RBracket) {
     ignore(self.eat(Question))
     return Iterate
   }
-  // `.[0]`, `.["k"]`, `.[.a]` — a single index expression.
-  let inner = self.parse_pipe()
+  // Slice with an omitted lower bound: `.[:b]`.
+  if self.eat(Colon) {
+    let upper = if self.peek() is RBracket {
+      None
+    } else {
+      Some(self.parse_pipe())
+    }
+    self.expect(RBracket, "']'")
+    ignore(self.eat(Question))
+    if upper is None {
+      raise ParseError("'.[:]' needs at least one slice bound")
+    }
+    return Slice(None, upper)
+  }
+  let first = self.parse_pipe()
+  if self.eat(Colon) {
+    // Slice: `.[a:b]` or `.[a:]`.
+    let upper = if self.peek() is RBracket {
+      None
+    } else {
+      Some(self.parse_pipe())
+    }
+    self.expect(RBracket, "']'")
+    ignore(self.eat(Question))
+    return Slice(Some(first), upper)
+  }
   self.expect(RBracket, "']'")
   ignore(self.eat(Question))
-  match inner {
+  match first {
     Literal(Num(n)) => Index(n.to_int())
     Literal(Str(s)) => IndexStr(s)
-    _ => IndexExpr(inner)
+    _ => IndexExpr(first)
   }
 }
 

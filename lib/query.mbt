@@ -62,6 +62,9 @@ pub(all) enum Filter {
   Field(String)
   /// `.[0]` / `.[-1]` — array index.
   Index(Int32)
+  /// `.[a:b]` — slice; each bound is `None` when omitted,
+  /// or `Some(filter)` evaluated against the input.
+  Slice(Filter?, Filter?)
   /// `.["key"]` — field access by a string literal.
   IndexStr(String)
   /// `.[expr]` — index/key computed by a filter.

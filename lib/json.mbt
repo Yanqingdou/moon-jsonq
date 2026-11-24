@@ -190,6 +190,84 @@ fn sorted_keys(entries : Array[ObjEntry]) -> Array[String] {
 }
 
 ///|
+/// Slice an array or a string, like jq `.[a:b]`.
+/// `lo` / `hi` are the evaluated bound values: `Null` means
+/// omitted, `Num(n)` is floored to an integer (jq floors,
+/// so `.[1.5:3]` starts at 1 and `.[-1.5:3]` at `len - 2`).
+/// Negative indices count from the end, out-of-range bounds
+/// are clamped, and `lo > hi` gives an empty result.
+/// `Null` input slices to `Null` (like jq); anything else
+/// that is not an array or a string gives `Null` (jq errors,
+/// we stay lenient like the rest of the evaluator).
+/// A bound that is neither a number nor null also gives `Null`.
+pub fn JVal::slice(self : JVal, lo : JVal, hi : JVal) -> JVal {
+  // A bound must be a number or null (omitted); anything else
+  // is an error in jq, and Null here, like the rest of the
+  // evaluator's lenient behaviour.
+  match (lo, hi) {
+    (Num(_) | Null, Num(_) | Null) => ()
+    _ => return Null
+  }
+  match self {
+    Null => Null
+    Arr(items) => {
+      let len = items.length()
+      let a = clamp_bound(lo, len, 0)
+      let b = clamp_bound(hi, len, len)
+      // Collect by hand: items[a:b] is an ArrayView, not an Array.
+      let out : Array[JVal] = []
+      let mut i = a
+      while i < b {
+        out.push(items[i])
+        i = i + 1
+      }
+      Arr(out)
+    }
+    Str(s) => {
+      let chars = s.to_array()
+      let len = chars.length()
+      let a = clamp_bound(lo, len, 0)
+      let b = clamp_bound(hi, len, len)
+      let out : Array[Char] = []
+      let mut i = a
+      while i < b {
+        out.push(chars[i])
+        i = i + 1
+      }
+      Str(String::from_array(out))
+    }
+    _ => Null
+  }
+}
+
+///|
+/// Resolve one slice bound to a clamped index in `[0, len]`.
+/// `Null` means "omitted", so it resolves to `default`
+/// (0 for the lower bound, `len` for the upper).
+fn clamp_bound(v : JVal, len : Int32, default : Int32) -> Int32 {
+  let i = match v {
+    Null => default
+    Num(n) => {
+      // Floor, like jq: 1.5 -> 1, -1.5 -> -2.
+      let f = n.floor().to_int()
+      if f < 0 {
+        len + f
+      } else {
+        f
+      }
+    }
+    _ => default
+  }
+  if i < 0 {
+    0
+  } else if i > len {
+    len
+  } else {
+    i
+  }
+}
+
+///|
 /// Look up `key` in an object. Missing key -> `Null`, like jq's
 /// `.missing` (which returns `null`, it does not error).
 pub fn JVal::field(self : JVal, key : String) -> JVal {

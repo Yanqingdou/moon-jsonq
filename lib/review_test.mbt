@@ -168,6 +168,94 @@ test "review: keys are sorted, objects keep input order" {
 }
 
 ///|
+test "p2: slice .[a:b] on arrays and strings" {
+  let arr = @lib.parse_json_or_null("[0, 1, 2, 3, 4]")
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".[1:3]") |> unwrap(), arr).to_string(),
+    "[1,2]",
+  )
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".[2:]") |> unwrap(), arr).to_string(),
+    "[2,3,4]",
+  )
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".[:2]") |> unwrap(), arr).to_string(),
+    "[0,1]",
+  )
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".[-2:]") |> unwrap(), arr).to_string(),
+    "[3,4]",
+  )
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".[:-1]") |> unwrap(), arr).to_string(),
+    "[0,1,2,3]",
+  )
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".[10:20]") |> unwrap(), arr).to_string(),
+    "[]",
+  )
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".[-10:2]") |> unwrap(), arr).to_string(),
+    "[0,1]",
+  )
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".[3:1]") |> unwrap(), arr).to_string(),
+    "[]",
+  )
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".[0:0]") |> unwrap(), arr).to_string(),
+    "[]",
+  )
+  // Null bounds mean "omitted", like jq.
+  let arr4 = @lib.parse_json_or_null("[0, 1, 2, 3]")
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".[1:null]") |> unwrap(), arr4).to_string(),
+    "[1,2,3]",
+  )
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".[null:2]") |> unwrap(), arr4).to_string(),
+    "[0,1]",
+  )
+  // Bounds are expressions, floored like jq (1.5 -> 1, -1.5 -> -2).
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".[0:1+1]") |> unwrap(), arr4).to_string(),
+    "[0,1]",
+  )
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".[1.5:3]") |> unwrap(), arr4).to_string(),
+    "[1,2]",
+  )
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".[-1.5:3]") |> unwrap(), arr4).to_string(),
+    "[2]",
+  )
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".[0:length]") |> unwrap(), arr4).to_string(),
+    "[0,1,2,3]",
+  )
+  // Strings slice by character.
+  let s = @lib.parse_json_or_null("\"abcdef\"")
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".[1:3]") |> unwrap(), s).to_string(),
+    "\"bc\"",
+  )
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".[-2:]") |> unwrap(), s).to_string(),
+    "\"ef\"",
+  )
+  // Null input slices to null, like jq.
+  assert_eq(
+    @lib.eval_one(@lib.parse_filter(".[0:1]") |> unwrap(), @lib.Null).to_string(),
+    "null",
+  )
+  // `.[:]` with both bounds omitted is a syntax error in jq.
+  match @lib.parse_filter(".[:]") {
+    Ok(_) => assert_eq(true, false)
+    Err(_) => assert_eq(true, true)
+  }
+}
+
+///|
 /// Helper: unwrap a parse result in tests, failing the test
 /// loudly if the filter did not parse.
 fn unwrap(r : Result[@lib.Filter, String]) -> @lib.Filter {

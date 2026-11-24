@@ -34,6 +34,17 @@ pub fn eval(filter : Filter, input : JVal) -> Array[JVal] {
         _ => [Null]
       }
     }
+    Slice(lo, hi) => {
+      let lov = match lo {
+        None => Null
+        Some(f) => eval_one(f, input)
+      }
+      let hiv = match hi {
+        None => Null
+        Some(f) => eval_one(f, input)
+      }
+      [input.slice(lov, hiv)]
+    }
     Iterate => input.iterate()
     Pipe(steps) => {
       let mut cur : Array[JVal] = [input]
