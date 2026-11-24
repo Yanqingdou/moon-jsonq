@@ -420,6 +420,40 @@ test "p2: variables and as binding" {
 }
 
 ///|
+test "p2: eval_env with --arg style bindings" {
+  let env = [
+    @lib.EnvEntry::new("name", @lib.Str("Yan")),
+    @lib.EnvEntry::new("nums", @lib.parse_json_or_null("[1, 2, 3]")),
+  ]
+  assert_eq(
+    @lib.eval_one_env(
+      @lib.parse_filter("\"hi \\($name)\"") |> unwrap(),
+      @lib.Null,
+      env,
+    ).to_string(),
+    "\"hi Yan\"",
+  )
+  assert_eq(
+    @lib.eval_one_env(
+      @lib.parse_filter("$nums | add") |> unwrap(),
+      @lib.Null,
+      env,
+    ).to_string(),
+    "6",
+  )
+  // Like jq, the FIRST --arg with a name wins: later ones
+  // with the same name do not shadow it.
+  let env2 = [
+    @lib.EnvEntry::new("x", @lib.Num(1.0)),
+    @lib.EnvEntry::new("x", @lib.Num(2.0)),
+  ]
+  assert_eq(
+    @lib.eval_one_env(@lib.parse_filter("$x") |> unwrap(), @lib.Null, env2).to_string(),
+    "1",
+  )
+}
+
+///|
 /// Helper: unwrap a parse result in tests, failing the test
 /// loudly if the filter did not parse.
 fn unwrap(r : Result[@lib.Filter, String]) -> @lib.Filter {

@@ -93,6 +93,12 @@ CASES = [
     ('{"a":5}', ". as $x | .a | $x"),
     ('{"a":1,"b":2}', ".a as $x | .b as $x | $x"),
     ('{"a":5}', '. as $x | $x.a'),
+    ("null", '"hello \\($name)"', ["--arg", "name", "Yan"]),
+    ("null", "$nums | add", ["--argjson", "nums", "[1,2,3]"]),
+    ("null", "$a, $b", ["--arg", "a", "1", "--arg", "b", "2"]),
+    ("null", "$x.a", ["--argjson", "x", '{"a":1}']),
+    ("null", "$x", ["--argjson", "x", "bad"]),
+    ('{"a":1}', '"\\($name)-\\(.a)"', ["--arg", "name", "x"]),
 ]
 
 def run(cmd, inp):
@@ -110,9 +116,15 @@ def parse_lines(out):
     return vals
 
 fails = 0
-for inp, filt in CASES:
-    mq_rc, mq_out, mq_err = run([MQ, filt], inp)
-    jq_rc, jq_out, jq_err = run(["jq", "-c", filt], inp)
+for case in CASES:
+    # A case is (input, filter) or (input, filter, extra_args),
+    # where extra_args go before the filter for both mq and jq.
+    if len(case) == 3:
+        inp, filt, extra = case
+    else:
+        inp, filt, extra = case[0], case[1], []
+    mq_rc, mq_out, mq_err = run([MQ] + extra + [filt], inp)
+    jq_rc, jq_out, jq_err = run(["jq", "-c"] + extra + [filt], inp)
     mq_vals = parse_lines(mq_out)
     jq_vals = parse_lines(jq_out)
     if mq_rc != 0 or jq_rc != 0:

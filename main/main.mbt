@@ -26,7 +26,8 @@
 /// (`supported_targets = "-all+native"` in `moon.pkg`).
 ///
 /// Exit codes: 0 ok, 1 bad filter / bad JSON / unreadable
-/// file, 2 usage error (unknown flag, missing argument).
+/// file, 2 usage error (unknown flag, missing argument,
+/// invalid JSON for --argjson).
 
 ///|
 const USAGE : String = "Usage: mq [options] [filter] [file ...]\n" +
@@ -44,13 +45,16 @@ const USAGE : String = "Usage: mq [options] [filter] [file ...]\n" +
   "  -n, --null-input     use null as the input, do not read stdin\n" +
   "  -s, --slurp          read all JSON values into one array first\n" +
   "  -f, --from-file FILE read the filter from FILE\n" +
+  "  --arg NAME VALUE     bind $NAME to VALUE (a string)\n" +
+  "  --argjson NAME JSON  bind $NAME to the parsed JSON value\n" +
   "\n" +
   "Examples:\n" +
   "  echo '{\"name\":\"Yan\"}' | mq '.name'\n" +
   "  echo '[3,1,2]' | mq 'sort'\n" +
   "  echo '{\"users\":[{\"name\":\"a\"}]}' | mq '.users[].name'\n" +
   "  mq -r '.name' data.json\n" +
-  "  echo '1\\n2\\n3' | mq -s 'add'\n"
+  "  echo '1\\n2\\n3' | mq -s 'add'\n" +
+  "  mq --arg name Yan '\"hello \\($name)\"' < /dev/null\n"
 
 ///|
 async fn main {
@@ -60,6 +64,9 @@ async fn main {
   let mut null_input = false
   let mut slurp = false
   let mut filter_file : String? = None
+  // `--arg` / `--argjson` bindings, in order; later ones
+  // shadow earlier ones with the same name (like jq).
+  let arg_vars : Array[@lib.EnvEntry] = []
   let positionals : Array[String] = []
   let mut i = 0
   let mut end_of_flags = false
@@ -85,6 +92,30 @@ async fn main {
       null_input = true
     } else if a == "-s" || a == "--slurp" {
       slurp = true
+    } else if a == "--arg" {
+      i = i + 1
+      if i + 1 >= args.length() {
+        eprintln("mq: --arg needs a name and a value")
+        eprintln(USAGE)
+        @env.exit(2)
+      }
+      arg_vars.push(@lib.EnvEntry::new(args[i], @lib.Str(args[i + 1])))
+      i = i + 1
+    } else if a == "--argjson" {
+      i = i + 1
+      if i + 1 >= args.length() {
+        eprintln("mq: --argjson needs a name and a JSON value")
+        eprintln(USAGE)
+        @env.exit(2)
+      }
+      match @lib.parse_json(args[i + 1]) {
+        Ok(v) => arg_vars.push(@lib.EnvEntry::new(args[i], v))
+        Err(_) => {
+          eprintln("mq: invalid JSON for --argjson '" + args[i] + "'")
+          @env.exit(2)
+        }
+      }
+      i = i + 1
     } else if a == "-f" || a == "--from-file" {
       i = i + 1
       if i >= args.length() {
@@ -143,13 +174,14 @@ async fn main {
 
   // Inputs: null, files, or stdin.
   if null_input {
-    run_filter(filter, @lib.Null, raw_output, pretty)
+    run_filter(filter, @lib.Null, raw_output, pretty, arg_vars)
     @env.exit(0)
   }
   if input_files.length() > 0 {
     for path in input_files {
       match read_file_text(path) {
-        Ok(text) => run_on_text(filter, text, slurp, raw_output, pretty)
+        Ok(text) =>
+          run_on_text(filter, text, slurp, raw_output, pretty, arg_vars)
         Err(msg) => {
           eprintln("mq: " + msg)
           @env.exit(1)
@@ -164,7 +196,7 @@ async fn main {
       @env.exit(1)
     }
   }
-  run_on_text(filter, text, slurp, raw_output, pretty)
+  run_on_text(filter, text, slurp, raw_output, pretty, arg_vars)
   @env.exit(0)
 }
 
@@ -190,6 +222,7 @@ fn run_on_text(
   slurp : Bool,
   raw_output : Bool,
   pretty : Bool,
+  env : Array[@lib.EnvEntry],
 ) -> Unit {
   if text.trim().length() == 0 {
     // Empty input, like jq: no output, exit 0.
@@ -207,17 +240,17 @@ fn run_on_text(
           }
         }
     }
-    run_filter(filter, @lib.Arr(values), raw_output, pretty)
+    run_filter(filter, @lib.Arr(values), raw_output, pretty, env)
     return
   }
   match @lib.parse_json(text) {
-    Ok(v) => run_filter(filter, v, raw_output, pretty)
+    Ok(v) => run_filter(filter, v, raw_output, pretty, env)
     Err(_) =>
       // Maybe several values, one per line (NDJSON).
       match @lib.parse_json_stream(text) {
         Ok(values) =>
           for v in values {
-            run_filter(filter, v, raw_output, pretty)
+            run_filter(filter, v, raw_output, pretty, env)
           }
         Err(msg) => {
           eprintln("mq: " + msg)
@@ -235,8 +268,9 @@ fn run_filter(
   input : @lib.JVal,
   raw_output : Bool,
   pretty : Bool,
+  env : Array[@lib.EnvEntry],
 ) -> Unit {
-  for out in @lib.eval(filter, input) {
+  for out in @lib.eval_env(filter, input, env) {
     if pretty {
       println(out.to_pretty_string())
     } else if raw_output {

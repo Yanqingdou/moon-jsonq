@@ -44,7 +44,7 @@ echo '{"name":"Yan","score":95}' | mq '.name'
 | `[f]`、`{k: f, …}`、`{name}` | 数组 / 对象构造 | ✅ |
 | 字面量 | `42`、`"hi"`、`true`、`null`、`[1,2]` | ✅ |
 
-CLI 选项：`-r/--raw-output`、`--pretty`、`-c`、`-s/--slurp`、`-n/--null-input`、`-f/--from-file`、`-h`、`--version`。错误（坏过滤器 / 坏 JSON / 读不到文件）打印到 stderr，退出码 1；用法错误退出码 2。
+CLI 选项：`-r/--raw-output`、`--pretty`、`-c`、`-s/--slurp`、`-n/--null-input`、`-f/--from-file`、`--arg NAME VALUE`、`--argjson NAME JSON`、`-h`、`--version`。错误（坏过滤器 / 坏 JSON / 读不到文件）打印到 stderr，退出码 1；用法错误退出码 2。
 
 ## 已验证（2026-11-24，实测）
 
@@ -52,10 +52,10 @@ CLI 选项：`-r/--raw-output`、`--pretty`、`-c`、`-s/--slurp`、`-n/--null-i
 
 ```bash
 moon check   # 通过
-moon test    # Total tests: 27, passed: 27, failed: 0
+moon test    # Total tests: 28, passed: 28, failed: 0
 moon check --target native   # 通过（CLI 是 native-only，见下）
 python3 tests/golden.py _build/native/debug/build/main/main.exe
-# 83 cases, 0 failures — 对照真实 jq 1.7，见 tests/golden.py
+# 89 cases, 0 failures — 对照真实 jq 1.7，见 tests/golden.py
 
 echo '{"name":"Yan","score":95}' | moon run --target native main -- '.name'
 # "Yan"
